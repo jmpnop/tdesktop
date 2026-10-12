@@ -7,6 +7,13 @@
 add_executable(Telegram WIN32 MACOSX_BUNDLE)
 init_non_host_target(Telegram)
 
+# Fork build fix (Apple clang 21 / macOS SDK 27): the new libc++ declares
+# std::allocator, pair, hash, vector, etc. differently than range-v3's own
+# hand-rolled forward declarations in meta.hpp, so they collide with
+# "redefinition ... as different kind of symbol". Use range-v3's documented
+# escape hatch to skip those forward-decls and rely on the real std headers.
+add_compile_definitions(META_NO_STD_FORWARD_DECLARATIONS)
+
 add_subdirectory(lib_rpl)
 add_subdirectory(lib_crl)
 add_subdirectory(lib_base)
@@ -70,6 +77,32 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# Every MCP tool has to agree across four hand-maintained places -- the
+# advertised Tool{} entry, the method declaration, the _toolHandlers binding
+# and the backing table -- and nothing in the type system relates them. The
+# server already checks part of this at startup, which is the right idea at the
+# wrong time: it fires on whoever happens to launch a build that has already
+# shipped. This runs the same comparison before the build finishes, so the
+# defects that were previously found by hand-written scripts after the fact
+# (tools advertised twice, callable but undiscoverable, arguments read but
+# never declared) fail the build instead.
+#
+# PRE_BUILD rather than a separate target so it cannot be skipped by building
+# Telegram directly.
+add_custom_command(TARGET Telegram
+PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} -E echo "Checking MCP tool declarations..."
+    COMMAND uv run --python 3.14 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_mcp_tools.py --quiet
+    COMMENT "MCP tool declaration cross-check"
+    VERBATIM
+)
+
+# Tlgrm: the MCP subsystem stores its archive/analytics data in SQLite via QtSql.
+# desktop-app::external_qt does not request the Sql component, so ask for it here
+# rather than patching the vendored cmake_helpers submodule — that keeps the fork's
+# change inside the fork and removes a submodule rebase from every future upgrade.
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Sql REQUIRED)
+
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_fido2
@@ -102,6 +135,7 @@ PRIVATE
     desktop-app::external_kcoreaddons
     desktop-app::external_qt_static_plugins
     desktop-app::external_qt
+    Qt${QT_VERSION_MAJOR}::Sql
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
@@ -1518,6 +1552,77 @@ PRIVATE
     main/session/send_as_peers.h
     main/session/session_show.cpp
     main/session/session_show.h
+    mcp/analytics.cpp
+    mcp/analytics.h
+    mcp/audit_logger.cpp
+    mcp/audit_logger.h
+    mcp/batch_operations.cpp
+    mcp/batch_operations.h
+    mcp/bot_base.cpp
+    mcp/bot_base.h
+    mcp/bot_command_handler.cpp
+    mcp/bot_command_handler.h
+    mcp/bot_manager.cpp
+    mcp/bot_manager.h
+    mcp/cache_manager.cpp
+    mcp/cache_manager.h
+    mcp/chat_archiver.cpp
+    mcp/chat_archiver.h
+    mcp/context_assistant_bot.cpp
+    mcp/context_assistant_bot.h
+    mcp/export_html.cpp
+    mcp/export_html.h
+    mcp/export_markdown.cpp
+    mcp/export_markdown.h
+    mcp/gradual_archiver.cpp
+    mcp/gradual_archiver.h
+    mcp/local_llm.cpp
+    mcp/local_llm.h
+    mcp/mcp_analytics_tools.cpp
+    mcp/mcp_archive_tools.cpp
+    mcp/mcp_batch_tools.cpp
+    mcp/mcp_bot_tools.cpp
+    mcp/mcp_bridge.cpp
+    mcp/mcp_bridge.h
+    mcp/mcp_business_tools.cpp
+    mcp/mcp_community_tools.cpp
+    mcp/mcp_core_tools.cpp
+    mcp/mcp_deleted_account_tools.cpp
+    mcp/mcp_download_tools.cpp
+    mcp/mcp_gradual_tools.cpp
+    mcp/mcp_helpers.h
+    mcp/mcp_message_ops.cpp
+    mcp/mcp_premium_tools.cpp
+    mcp/mcp_resource_handlers.cpp
+    mcp/mcp_rich_message_tools.cpp
+    mcp/mcp_scheduler_tools.cpp
+    mcp/mcp_search_tools.cpp
+    mcp/mcp_server.h
+    mcp/mcp_server_complete.cpp
+    mcp/mcp_server_includes.h
+    mcp/mcp_settings_tools.cpp
+    mcp/mcp_stars_tools.cpp
+    mcp/mcp_system_tools.cpp
+    mcp/mcp_tool_backing.cpp
+    mcp/mcp_tool_backing.h
+    mcp/mcp_tool_registry.cpp
+    mcp/mcp_topic_tools.cpp
+    mcp/mcp_extra_tools.cpp
+    mcp/mcp_wallet_tools.cpp
+    mcp/message_scheduler.cpp
+    mcp/message_scheduler.h
+    mcp/rbac.cpp
+    mcp/rbac.h
+    mcp/semantic_search.cpp
+    mcp/semantic_search.h
+    mcp/text_to_speech.cpp
+    mcp/text_to_speech.h
+    mcp/ton_wallet.cpp
+    mcp/ton_wallet.h
+    mcp/video_generator.cpp
+    mcp/video_generator.h
+    mcp/voice_transcription.cpp
+    mcp/voice_transcription.h
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_edit.cpp
@@ -2551,12 +2656,12 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "com.tlgrm.app$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "com.tdesktop.Telegram")
+        set(bundle_identifier "com.tlgrm.app")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "Telegram")
+    set(output_name "Tlgrm")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
@@ -2701,6 +2806,13 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
     set_target_properties(Updater PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${output_folder}
     )
+
+    # Fork build fix (macOS SDK 27): updater_osx.m uses NSWorkspace launch APIs
+    # deprecated since macOS 11. At the SDK-27-required deployment target (12.0)
+    # they warn, and this target builds with -Werror, so they become errors.
+    # They still work (deprecated, not removed); silence the deprecation the same
+    # way the main targets do.
+    target_compile_options(Updater PRIVATE -Wno-deprecated-declarations)
 
     if (WIN32)
         get_filename_component(lib_base_loc lib_base REALPATH)

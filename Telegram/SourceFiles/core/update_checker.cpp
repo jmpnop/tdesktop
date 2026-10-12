@@ -1017,9 +1017,10 @@ void MtpChecker::start() {
 		startCanary();
 		return;
 	}
-	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = "tdhbcfeed"
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
+	// WHY: Tlgrm ships one macOS updater generation, so the feed channel is a
+	// literal matching the HTTP host updates.71grm.site, not upstream's
+	// tdhbcfeed + AutoUpdateVersion() suffix.
+	const auto feed = u"updates71grm"_q;
 	MTP::ResolveChannel(&_mtp, feed, [=](
 			const MTPInputChannel &channel) {
 		_mtp.send(
