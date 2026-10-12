@@ -426,7 +426,7 @@ void Manager::buildAppleMenu(QMenu *main) {
 			});
 		};
 		_about = main->addAction(
-			u"About Telegram"_q,
+			u"About Tlgrm"_q,
 			std::move(callback));
 		_about->setMenuRole(QAction::AboutQtRole);
 	}

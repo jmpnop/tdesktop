@@ -121,6 +121,12 @@ Sandbox::Sandbox(int &argc, char **argv)
 #ifdef Q_OS_MAC
 	Platform::CreateGlobalMenu();
 #endif // Q_OS_MAC
+
+	// Prevent Qt from terminating the app when the last visible window closes —
+	// the gradual export panel hides itself while work continues, and MCP tool
+	// calls must survive a windowless moment. Telegram manages its own quit
+	// lifecycle through Core::Quit().
+	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {
@@ -165,6 +171,17 @@ int Sandbox::start() {
 		}
 	}
 
+	// Tlgrm: gManyInstance is deliberately NOT set for --mcp instances.
+	//
+	// It reads like a single-instance opt-out, but it is not one: the handoff
+	// is driven unconditionally by connectToServer() below, and gManyInstance
+	// has only two consumers — the log line in singleInstanceChecked() and
+	// update_checker.cpp, which skips *every* update check while it is set.
+	// Setting it here therefore bought no coexistence at all (an --mcp launch
+	// still hands off with CMD:show and quits) and silently disabled
+	// auto-updates for the MCP build. Genuine coexistence would need a
+	// distinct _localServerName, which also needs a separate working dir to
+	// avoid two processes opening one tdata.
 #if defined Q_OS_LINUX && QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
 	_localServer.setSocketOptions(QLocalServer::AbstractNamespaceOption);
 	_localSocket.setSocketOptions(QLocalSocket::AbstractNamespaceOption);
@@ -511,6 +528,17 @@ void Sandbox::singleInstanceChecked() {
 			return;
 		}
 		_lastCrashDump = crashdump;
+
+		// In MCP mode there is no user at a screen to dismiss a modal crash
+		// dialog, and blocking here would hang every waiting tool call. Restart
+		// reporting and launch straight through instead.
+		if (QCoreApplication::arguments().contains(u"--mcp"_q)) {
+			LOG(("MCP: Skipping crash report dialog"));
+			CrashReports::Restart();
+			launchApplication();
+			return;
+		}
+
 		auto window = new LastCrashedWindow(
 			_lastCrashDump,
 			[=] { launchApplication(); });

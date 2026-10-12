@@ -79,6 +79,17 @@ FilteredCommandLineArguments::FilteredCommandLineArguments(
 		pushArgument(argv[i]);
 	}
 
+	// Preserve --mcp. kForwardArgumentCount is 1, so without this the flag never
+	// reaches QCoreApplication::arguments() and both Application::run() and
+	// Sandbox::singleInstanceChecked() would be unable to see it — the stdio
+	// transport would be permanently unreachable.
+	for (auto i = 1; i != argc; ++i) {
+		if (argv[i] && QLatin1String(argv[i]) == QLatin1String("--mcp")) {
+			pushArgument("--mcp");
+			break;
+		}
+	}
+
 #ifdef Q_OS_WIN
 	// WHY: as in Qt 5, GDI draws at dpr 1 following the system smoothing,
 	// and unlike DirectWrite it doesn't keep every font file mapped.
