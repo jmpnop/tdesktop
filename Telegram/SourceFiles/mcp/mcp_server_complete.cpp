@@ -364,7 +364,6 @@ void Server::stop() {
 	_videoGenerator.reset();
 	_textToSpeech.reset();
 	_localLLM.reset();
-	_tonWallet.reset();
 	_voiceTranscription.reset();
 	_cache.reset();
 
@@ -428,7 +427,6 @@ void Server::clearSession() {
 	_videoGenerator.reset();
 	_textToSpeech.reset();
 	_localLLM.reset();
-	_tonWallet.reset();
 	_voiceTranscription.reset();
 
 	if (_scheduler) {
@@ -615,21 +613,6 @@ void Server::initializeSessionComponents() {
 	} else {
 		qWarning() << "MCP: Failed to start VideoGenerator";
 		fprintf(stderr, "[MCP] WARNING: VideoGenerator failed to start\n");
-		fflush(stderr);
-	}
-
-	// TonWallet - TON/Fragment crypto payment integration
-	_tonWallet = std::make_unique<TonWallet>(this);
-	if (_tonWallet->start(&_db)) {
-		fprintf(stderr, "[MCP] TonWallet initialized (provider: %s, network: %s)\n",
-			(_tonWallet->provider() == TonProvider::TonSdk ? "tonsdk"
-				: _tonWallet->provider() == TonProvider::TonUtils ? "tonutils"
-				: "ton-cli"),
-			_tonWallet->network().toUtf8().constData());
-		fflush(stderr);
-	} else {
-		qWarning() << "MCP: Failed to start TonWallet";
-		fprintf(stderr, "[MCP] WARNING: TonWallet failed to start (install: pip install tonsdk)\n");
 		fflush(stderr);
 	}
 
@@ -1654,6 +1637,10 @@ void Server::initializeToolHandlers() {
 	// SECURITY SETTINGS TOOLS
 	_toolHandlers["get_security_settings"] = [this](const QJsonObject &args) { return toolGetSecuritySettings(args); };
 	_toolHandlers["get_active_sessions"] = [this](const QJsonObject &args) { return toolGetActiveSessions(args); };
+	_toolHandlers["get_sensitive_content_setting"] = [this](const QJsonObject &args) { return toolGetSensitiveContentSetting(args); };
+	_toolHandlers["set_sensitive_content_enabled"] = [this](const QJsonObject &args) { return toolSetSensitiveContentEnabled(args); };
+	_toolHandlers["get_connected_websites"] = [this](const QJsonObject &args) { return toolGetConnectedWebsites(args); };
+	_toolHandlers["disconnect_website"] = [this](const QJsonObject &args) { return toolDisconnectWebsite(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };

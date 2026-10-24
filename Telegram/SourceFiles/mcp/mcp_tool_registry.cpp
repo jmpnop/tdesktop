@@ -3241,19 +3241,50 @@ void Server::registerTools() {
 		},
 		Tool{
 			"create_crypto_payment",
-			"Create a crypto payment request",
+			"Read the app's TON wallet (action get_address|get_balance|get_history); send and wallet creation are refused (use the in-app wallet)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
-					{"amount", QJsonObject{{"type", "number"}, {"description", "Amount"}}},
-					{"currency", QJsonObject{{"type", "string"}, {"description", "Currency (TON, etc)"}}},
-					{"action", QJsonObject{{"type", "string"}, {"description", "Operation to perform (default send)."}}},
+					{"action", QJsonObject{{"type", "string"}, {"description", "get_address, get_balance or get_history (read-only); send/create_wallet/import_wallet are refused. Default send."}}},
+					{"amount", QJsonObject{{"type", "number"}, {"description", "Amount in TON (echoed back by the refused send action)."}}},
+					{"currency", QJsonObject{{"type", "string"}, {"description", "Currency; only TON is meaningful."}}},
 					{"comment", QJsonObject{{"type", "string"}, {"description", "Comment attached to the transfer."}}},
-					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 20)."}}},
-					{"mnemonics", QJsonObject{{"type", "string"}, {"description", "Wallet seed phrase used to sign the transfer."}}},
-					{"recipient", QJsonObject{{"type", "string"}, {"description", "Destination wallet address."}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of history entries to return (default 20)."}}},
+					{"recipient", QJsonObject{{"type", "string"}, {"description", "Destination wallet address (echoed back by the refused send action)."}}},
 				}},
-				{"required", QJsonArray{"amount", "currency"}}
+				{"required", QJsonArray{}}
+			}
+		},
+		Tool{
+			"get_sensitive_content_setting",
+			"Read whether sensitive (18+) media display is enabled, and whether it can be changed",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"set_sensitive_content_enabled",
+			"Enable or disable display of sensitive (18+) media for this account",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"enabled", QJsonObject{{"type", "boolean"}, {"description", "true to show sensitive content, false to hide it."}}},
+				}},
+				{"required", QJsonArray{"enabled"}}
+			}
+		},
+		Tool{
+			"get_connected_websites",
+			"List websites you have logged into via Telegram (Telegram Login), with their access details",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"disconnect_website",
+			"Revoke a website's Telegram Login access by its hash from get_connected_websites",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"hash", QJsonObject{{"type", "string"}, {"description", "The website hash (as a string) from get_connected_websites."}}},
+				}},
+				{"required", QJsonArray{"hash"}}
 			}
 		},
 

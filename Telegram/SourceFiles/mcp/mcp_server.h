@@ -56,7 +56,6 @@ class VoiceTranscription;
 class TextToSpeech;
 class LocalLLM;
 class VideoGenerator;
-class TonWallet;
 class BotManager;
 class CacheManager;
 class GradualArchiver;
@@ -351,6 +350,10 @@ private:
 	// Security settings tools (6 tools)
 	QJsonObject toolGetSecuritySettings(const QJsonObject &args);
 	QJsonObject toolGetActiveSessions(const QJsonObject &args);
+	QJsonObject toolGetSensitiveContentSetting(const QJsonObject &args);
+	QJsonObject toolSetSensitiveContentEnabled(const QJsonObject &args);
+	QJsonObject toolGetConnectedWebsites(const QJsonObject &args);
+	QJsonObject toolDisconnectWebsite(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);
@@ -962,7 +965,6 @@ private:
 	std::unique_ptr<TextToSpeech> _textToSpeech;
 	std::unique_ptr<LocalLLM> _localLLM;
 	std::unique_ptr<VideoGenerator> _videoGenerator;
-	std::unique_ptr<TonWallet> _tonWallet;
 	std::unique_ptr<BotManager> _botManager;
 	std::unique_ptr<CacheManager> _cache;
 	std::unique_ptr<GradualArchiver> _gradualArchiver;

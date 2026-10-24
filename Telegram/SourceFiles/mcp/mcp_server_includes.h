@@ -19,7 +19,6 @@
 #include "text_to_speech.h"
 #include "local_llm.h"
 #include "video_generator.h"
-#include "ton_wallet.h"
 #include "bot_manager.h"
 #include "context_assistant_bot.h"
 #include "cache_manager.h"

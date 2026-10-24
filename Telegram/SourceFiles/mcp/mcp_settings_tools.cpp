@@ -6,6 +6,8 @@
 
 #include "mcp_server_includes.h"
 
+#include "wallet/wallet_session.h"
+
 namespace MCP {
 // ============================================================================
 // Privacy helper functions
@@ -1238,177 +1240,116 @@ QJsonObject Server::toolGetWithdrawalStatus(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolCreateCryptoPayment(const QJsonObject &args) {
-	double amount = args["amount"].toDouble();
-	QString currency = args.value("currency").toString("TON");
-	QString recipientAddress = args["recipient"].toString();
-	QString comment = args.value("comment").toString();
-	QString action = args.value("action").toString("send");
+	const auto amount = args["amount"].toDouble();
+	const auto currency = args.value("currency").toString("TON");
+	const auto recipient = args["recipient"].toString();
+	const auto comment = args.value("comment").toString();
+	const auto action = args.value("action").toString("send");
+	const auto limit = clampLimit(args.value("limit").toInt(20), 20, 100);
+
+	if (!_session) {
+		return toolError("No active session");
+	}
+
+	// WHY: bind the app's real non-custodial Wallet::Session, not a second
+	// wallet -- this tool once drove a phantom tonsdk subprocess with its own
+	// seed in MCP SQLite. Reads report the real wallet; writes are refused.
+	auto &wallet = _session->wallet();
+	wallet.ensureLoaded();
+
+	const auto presenceName = [](Wallet::Presence p) -> QString {
+		switch (p) {
+		case Wallet::Presence::Unknown: return "unknown";
+		case Wallet::Presence::Provisioning: return "provisioning";
+		case Wallet::Presence::Missing: return "missing";
+		case Wallet::Presence::Unavailable: return "unavailable";
+		case Wallet::Presence::AddressUnreadable: return "address_unreadable";
+		case Wallet::Presence::Ready: return "ready";
+		}
+		return "unknown";
+	};
+
+	const auto address = wallet.address();
 
 	QJsonObject result;
-	if (recipientAddress.isEmpty() && action == "send") {
-		result["error"] = "Missing recipient address";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_tonWallet) {
-		result["error"] = "TonWallet not initialized";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_tonWallet->isRunning()) {
-		result["error"] = "TonWallet not running (install: pip install tonsdk)";
-		result["success"] = false;
-		return result;
-	}
-
-	// Handle different actions
-	if (action == "create_wallet") {
-		auto walletResult = _tonWallet->createWallet();
-		result["success"] = walletResult.success;
-		if (walletResult.success) {
-			result["address"] = walletResult.address;
-			result["raw_address"] = walletResult.rawAddress;
-			QJsonArray mnArray;
-			for (const auto &word : walletResult.mnemonics) {
-				mnArray.append(word);
-			}
-			result["mnemonics"] = mnArray;
-			result["warning"] = "Save these 24 words securely. They cannot be recovered.";
-		} else {
-			result["error"] = walletResult.error;
-		}
-		return result;
-	}
-
-	if (action == "import_wallet") {
-		auto mnemonicsStr = args.value("mnemonics").toString();
-		if (mnemonicsStr.isEmpty()) {
-			result["error"] = "Missing mnemonics (24 space-separated words)";
-			result["success"] = false;
-			return result;
-		}
-		auto words = mnemonicsStr.split(' ', Qt::SkipEmptyParts);
-		auto walletResult = _tonWallet->importWallet(words);
-		result["success"] = walletResult.success;
-		if (walletResult.success) {
-			result["address"] = walletResult.address;
-			result["raw_address"] = walletResult.rawAddress;
-			result["status"] = "imported";
-		} else {
-			result["error"] = walletResult.error;
+	if (action == "get_address") {
+		result["success"] = true;
+		result["action"] = action;
+		result["presence"] = presenceName(wallet.presence());
+		result["has_wallet"] = address.has_value();
+		if (address) {
+			result["address"] = *address;
+			result["address_bounceable"] = wallet.addressFriendly(true);
 		}
 		return result;
 	}
 
 	if (action == "get_balance") {
-		auto walletResult = _tonWallet->getBalance();
-		result["success"] = walletResult.success;
-		if (walletResult.success) {
-			result["address"] = walletResult.address;
-			result["balance_ton"] = walletResult.balanceTon;
-			result["balance_nano"] = QString::number(walletResult.balanceNano);
-			result["network"] = _tonWallet->network();
-		} else {
-			result["error"] = walletResult.error;
+		result["success"] = true;
+		result["action"] = action;
+		result["presence"] = presenceName(wallet.presence());
+		result["balance_nano"] = qint64(wallet.balanceNano());
+		if (address) {
+			result["address"] = *address;
 		}
-		return result;
-	}
-
-	if (action == "get_address") {
-		auto walletResult = _tonWallet->getWalletAddress();
-		result["success"] = walletResult.success;
-		if (walletResult.success) {
-			result["address"] = walletResult.address;
-			result["raw_address"] = walletResult.rawAddress;
-			result["has_wallet"] = true;
-		} else {
-			result["error"] = walletResult.error;
-			result["has_wallet"] = false;
-		}
+		// ponytail: cached balance -- await balanceNanoValue() for a settled read.
+		result["note"] = "balance_nano is the last synced wallet balance in "
+			"nanoTON (1 TON = 1e9 nanoTON); presence says whether it is ready.";
 		return result;
 	}
 
 	if (action == "get_history") {
-		int limit = args.value("limit").toInt(20);
-		auto txs = _tonWallet->getTransactionHistory(limit);
-		QJsonArray txArray;
-		for (const auto &tx : txs) {
-			QJsonObject txObj;
-			txObj["hash"] = tx.hash;
-			txObj["amount_ton"] = tx.amountTon;
-			txObj["from"] = tx.from;
-			txObj["to"] = tx.to;
-			txObj["comment"] = tx.comment;
-			txObj["timestamp"] = tx.timestamp.toString(Qt::ISODate);
-			txObj["is_incoming"] = tx.isIncoming;
-			txArray.append(txObj);
+		const auto &history = wallet.history();
+		auto list = QJsonArray();
+		for (const auto &item : history) {
+			if (list.size() >= limit) {
+				break;
+			}
+			auto tx = QJsonObject();
+			tx["id"] = item.id;
+			tx["incoming"] = item.incoming;
+			tx["amount_nano"] = qint64(item.amountNano);
+			if (!item.counterparty.isEmpty()) {
+				tx["counterparty"] = item.counterparty;
+			}
+			if (!item.comment.isEmpty() && !item.commentEncrypted) {
+				tx["comment"] = item.comment;
+			}
+			if (item.date) {
+				tx["date"] = qint64(*item.date);
+			}
+			list.append(tx);
 		}
 		result["success"] = true;
-		result["transactions"] = txArray;
-		result["count"] = txArray.count();
+		result["action"] = action;
+		result["transactions"] = list;
+		result["count"] = list.size();
 		return result;
 	}
 
-	if (action == "get_jettons") {
-		auto jettons = _tonWallet->getJettonBalances();
-		result["success"] = true;
-		result["jettons"] = jettons;
-		return result;
-	}
-
-	if (action == "stats") {
-		auto stats = _tonWallet->getStats();
-		result["success"] = true;
-		result["total_transactions"] = stats.totalTransactions;
-		result["successful_transactions"] = stats.successfulTransactions;
-		result["failed_transactions"] = stats.failedTransactions;
-		result["total_sent_ton"] = stats.totalSentTon;
-		result["total_received_ton"] = stats.totalReceivedTon;
-		if (stats.lastTransaction.isValid()) {
-			result["last_transaction"] = stats.lastTransaction.toString(Qt::ISODate);
-		}
-		result["network"] = _tonWallet->network();
-		return result;
-	}
-
-	// Default action: send payment
-	if (amount <= 0) {
-		result["error"] = "Amount must be positive";
-		result["success"] = false;
-		return result;
-	}
-
-	if (currency.toUpper() != "TON") {
-		result["error"] = "Only TON currency is supported";
-		result["success"] = false;
-		return result;
-	}
-
-	if (!_tonWallet->hasWallet()) {
-		result["error"] = "No wallet configured. Use action='create_wallet' or action='import_wallet' first.";
-		result["success"] = false;
-		return result;
-	}
-
-	auto paymentResult = _tonWallet->sendPayment(
-		recipientAddress, amount, comment);
-
-	result["success"] = paymentResult.success;
-	if (paymentResult.success) {
-		result["status"] = paymentResult.status;
-		result["tx_hash"] = paymentResult.txHash;
+	// Write actions are refused rather than faked.
+	result["success"] = false;
+	result["implemented"] = false;
+	result["action"] = action;
+	if (action == "create_wallet" || action == "import_wallet") {
+		result["error"] = "Creating or importing a wallet here is not supported";
+		result["reason"] = "The app already owns one non-custodial TON wallet, "
+			"whose seed phrase is created and restored only through the wallet "
+			"panel behind the device vault. A second seed minted by this server "
+			"-- the old \"mnemonics\" path -- would be a wallet the user never "
+			"sees and cannot recover.";
+	} else {
+		result["error"] = "Sending TON is not implemented";
+		result["recipient"] = recipient;
 		result["amount"] = amount;
 		result["currency"] = currency;
-		result["recipient"] = recipientAddress;
-		result["network"] = _tonWallet->network();
 		if (!comment.isEmpty()) {
 			result["comment"] = comment;
 		}
-	} else {
-		result["error"] = paymentResult.error;
-		result["status"] = paymentResult.status;
+		result["reason"] = "A transfer must be signed with the wallet's vault key "
+			"authorization (passcode / seed unlock), which this server does not "
+			"and should not hold. Send from the in-app wallet. Use action "
+			"get_address, get_balance or get_history for read-only access.";
 	}
 	return result;
 }
@@ -3048,6 +2989,117 @@ QJsonObject Server::toolTransferGift(const QJsonObject &args) {
 
 QJsonObject Server::toolCancelListing(const QJsonObject &args) {
 	return toolDelistGift(args);
+}
+
+// ============================================================================
+// WAVE 1 - account.* security/content tools (real MTP, read-only + toggles)
+// ============================================================================
+
+QJsonObject Server::toolGetSensitiveContentSetting(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetContentSettings(
+		)).done([=](const MTPaccount_ContentSettings &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["sensitive_enabled"] = data.is_sensitive_enabled();
+			value["sensitive_can_change"] = data.is_sensitive_can_change();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSetSensitiveContentEnabled(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	if (!args.contains("enabled")) {
+		return toolError("enabled is required (true to show sensitive content)");
+	}
+	const auto enabled = args["enabled"].toBool();
+	using Flags = MTPaccount_SetContentSettings::Flags;
+	auto flags = Flags(0);
+	if (enabled) {
+		flags |= MTPaccount_SetContentSettings::Flag::f_sensitive_enabled;
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_SetContentSettings(
+			MTP_flags(flags)
+		)).done([=]() {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["sensitive_enabled"] = enabled;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetConnectedWebsites(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetWebAuthorizations(
+		)).done([=](const MTPaccount_WebAuthorizations &result) {
+			const auto &data = result.data();
+			_session->data().processUsers(data.vusers());
+			auto list = QJsonArray();
+			for (const auto &auth : data.vauthorizations().v) {
+				const auto &w = auth.data();
+				auto entry = QJsonObject();
+				// hash is a 64-bit id returned as a string so JSON keeps it intact.
+				entry["hash"] = QString::number(w.vhash().v);
+				entry["bot_id"] = qint64(w.vbot_id().v);
+				entry["domain"] = qs(w.vdomain());
+				entry["browser"] = qs(w.vbrowser());
+				entry["platform"] = qs(w.vplatform());
+				entry["ip"] = qs(w.vip());
+				entry["region"] = qs(w.vregion());
+				entry["date_created"] = qint64(w.vdate_created().v);
+				entry["date_active"] = qint64(w.vdate_active().v);
+				list.append(entry);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["websites"] = list;
+			value["count"] = list.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolDisconnectWebsite(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto hash = args["hash"].toVariant().toLongLong();
+	if (!hash) {
+		return toolError("hash is required: the website hash from "
+			"get_connected_websites");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_ResetWebAuthorization(
+			MTP_long(hash)
+		)).done([=]() {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["hash"] = QString::number(hash);
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 

@@ -1678,8 +1678,6 @@ PRIVATE
     mcp/semantic_search.h
     mcp/text_to_speech.cpp
     mcp/text_to_speech.h
-    mcp/ton_wallet.cpp
-    mcp/ton_wallet.h
     mcp/video_generator.cpp
     mcp/video_generator.h
     mcp/voice_transcription.cpp
