@@ -3079,6 +3079,123 @@ QJsonObject Server::toolGetConnectedWebsites(const QJsonObject &args) {
 	});
 }
 
+// Wave 3 - account security & global privacy (real MTP).
+QJsonObject Server::toolGet2faStatus(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetPassword(
+		)).done([=](const MTPaccount_Password &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["has_password"] = data.is_has_password();
+			value["has_recovery"] = data.is_has_recovery();
+			if (const auto hint = data.vhint()) {
+				value["hint"] = qs(*hint);
+			}
+			if (const auto email = data.vlogin_email_pattern()) {
+				value["login_email_pattern"] = qs(*email);
+			}
+			if (const auto unconf = data.vemail_unconfirmed_pattern()) {
+				value["email_unconfirmed_pattern"] = qs(*unconf);
+			}
+			if (const auto reset = data.vpending_reset_date()) {
+				value["pending_reset_date"] = qint64(reset->v);
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetAccountSelfDestruct(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetAccountTTL(
+		)).done([=](const MTPAccountDaysTTL &result) {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["days"] = result.data().vdays().v;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSetAccountSelfDestruct(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto days = args["days"].toInt();
+	if (days <= 0) {
+		return toolError("days must be a positive number of days of inactivity "
+			"before the account is deleted");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_SetAccountTTL(
+			MTP_accountDaysTTL(MTP_int(days))
+		)).done([=]() {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["days"] = days;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolTerminateAllOtherSessions(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPauth_ResetAuthorizations(
+		)).done([=]() {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["note"] = "All other sessions (devices) have been logged out.";
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetGlobalPrivacy(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetGlobalPrivacySettings(
+		)).done([=](const MTPGlobalPrivacySettings &result) {
+			const auto &d = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["archive_and_mute_new_noncontact_peers"]
+				= d.is_archive_and_mute_new_noncontact_peers();
+			value["keep_archived_unmuted"] = d.is_keep_archived_unmuted();
+			value["keep_archived_folders"] = d.is_keep_archived_folders();
+			value["hide_read_marks"] = d.is_hide_read_marks();
+			value["new_noncontact_peers_require_premium"]
+				= d.is_new_noncontact_peers_require_premium();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
 QJsonObject Server::toolDisconnectWebsite(const QJsonObject &args) {
 	if (!_session) {
 		return toolError("No active session");

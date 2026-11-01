@@ -356,6 +356,11 @@ private:
 	QJsonObject toolSetSensitiveContentEnabled(const QJsonObject &args);
 	QJsonObject toolGetConnectedWebsites(const QJsonObject &args);
 	QJsonObject toolDisconnectWebsite(const QJsonObject &args);
+	QJsonObject toolGet2faStatus(const QJsonObject &args);
+	QJsonObject toolGetAccountSelfDestruct(const QJsonObject &args);
+	QJsonObject toolSetAccountSelfDestruct(const QJsonObject &args);
+	QJsonObject toolTerminateAllOtherSessions(const QJsonObject &args);
+	QJsonObject toolGetGlobalPrivacy(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);

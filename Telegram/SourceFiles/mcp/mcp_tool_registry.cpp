@@ -3317,6 +3317,37 @@ void Server::registerTools() {
 				{"required", QJsonArray{"hash"}}
 			}
 		},
+		Tool{
+			"get_2fa_status",
+			"Report whether a 2FA cloud password, recovery email, or login email is set (read-only)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"get_account_self_destruct",
+			"Get the account self-destruct timer (days of inactivity before deletion)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"set_account_self_destruct",
+			"Set the account self-destruct timer (days of inactivity before the account is deleted)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"days", QJsonObject{{"type", "integer"}, {"description", "Days of inactivity before deletion (e.g. 30, 90, 180, 365)."}}},
+				}},
+				{"required", QJsonArray{"days"}}
+			}
+		},
+		Tool{
+			"terminate_all_other_sessions",
+			"Log out all other active sessions (devices) except this one",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"get_global_privacy",
+			"Read account-wide privacy settings (archive-and-mute new, hide read marks, require premium to DM, etc.)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

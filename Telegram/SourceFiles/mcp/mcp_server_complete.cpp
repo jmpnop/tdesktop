@@ -1643,6 +1643,11 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["set_sensitive_content_enabled"] = [this](const QJsonObject &args) { return toolSetSensitiveContentEnabled(args); };
 	_toolHandlers["get_connected_websites"] = [this](const QJsonObject &args) { return toolGetConnectedWebsites(args); };
 	_toolHandlers["disconnect_website"] = [this](const QJsonObject &args) { return toolDisconnectWebsite(args); };
+	_toolHandlers["get_2fa_status"] = [this](const QJsonObject &args) { return toolGet2faStatus(args); };
+	_toolHandlers["get_account_self_destruct"] = [this](const QJsonObject &args) { return toolGetAccountSelfDestruct(args); };
+	_toolHandlers["set_account_self_destruct"] = [this](const QJsonObject &args) { return toolSetAccountSelfDestruct(args); };
+	_toolHandlers["terminate_all_other_sessions"] = [this](const QJsonObject &args) { return toolTerminateAllOtherSessions(args); };
+	_toolHandlers["get_global_privacy"] = [this](const QJsonObject &args) { return toolGetGlobalPrivacy(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };
