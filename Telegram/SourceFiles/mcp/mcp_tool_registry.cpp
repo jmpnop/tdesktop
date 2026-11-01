@@ -3348,6 +3348,42 @@ void Server::registerTools() {
 			"Read account-wide privacy settings (archive-and-mute new, hide read marks, require premium to DM, etc.)",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
+		Tool{
+			"process_join_request",
+			"Approve or decline a user's pending request to join a channel or group",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"user_id", QJsonObject{{"type", "integer"}, {"description", "User whose join request to process."}}},
+					{"approve", QJsonObject{{"type", "boolean"}, {"description", "true to approve, false to decline."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "user_id"}}
+			}
+		},
+		Tool{
+			"delete_invite_link",
+			"Delete an exported invite link from a channel or group",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"link", QJsonObject{{"type", "string"}, {"description", "The invite link URL to delete."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "link"}}
+			}
+		},
+		Tool{
+			"get_recommended_channels",
+			"List channels similar/recommended for a channel (or global recommendations if chat_id omitted)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel ID to get similar channels for; omit for global recommendations."}}},
+				}},
+				{"required", QJsonArray{}}
+			}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

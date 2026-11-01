@@ -1118,4 +1118,124 @@ QJsonObject Server::toolGetChannelFull(const QJsonObject &args) {
 	return result;
 }
 
+// Wave 4 - invite links, join requests, recommendations (real MTP).
+QJsonObject Server::toolProcessJoinRequest(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto userId = args["user_id"].toVariant().toLongLong();
+	const auto approve = args.value("approve").toBool();
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto userPeer = resolvePeer(PeerId(userId));
+	const auto user = userPeer ? userPeer->asUser() : nullptr;
+	if (!user) {
+		return toolError("User not found");
+	}
+	using Flag = MTPmessages_HideChatJoinRequest::Flag;
+	auto flags = MTPmessages_HideChatJoinRequest::Flags(0);
+	if (approve) {
+		flags |= Flag::f_approved;
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_HideChatJoinRequest(
+			MTP_flags(flags),
+			peer->input(),
+			user->inputUser()
+		)).done([=](const MTPUpdates &result) {
+			_session->api().applyUpdates(result);
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["user_id"] = userId;
+			value["approved"] = approve;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolDeleteInviteLink(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto link = args["link"].toString();
+	if (link.isEmpty()) {
+		return toolError("link is required");
+	}
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_DeleteExportedChatInvite(
+			peer->input(),
+			MTP_string(link)
+		)).done([=]() {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["link"] = link;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetRecommendedChannels(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args.value("chat_id").toVariant().toLongLong();
+	using Flag = MTPchannels_GetChannelRecommendations::Flag;
+	auto flags = MTPchannels_GetChannelRecommendations::Flags(0);
+	auto input = MTP_inputChannelEmpty();
+	if (chatId) {
+		const auto peer = resolvePeer(PeerId(chatId));
+		const auto channel = peer ? peer->asChannel() : nullptr;
+		if (!channel) {
+			return toolError("Channel not found");
+		}
+		flags |= Flag::f_channel;
+		input = channel->inputChannel();
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPchannels_GetChannelRecommendations(
+			MTP_flags(flags),
+			input
+		)).done([=](const MTPmessages_Chats &result) {
+			const auto &chats = result.match([](const auto &data)
+					-> const MTPVector<MTPChat> & {
+				return data.vchats();
+			});
+			_session->data().processChats(chats);
+			auto list = QJsonArray();
+			for (const auto &chat : chats.v) {
+				chat.match([&](const MTPDchannel &d) {
+					auto o = QJsonObject();
+					o["id"] = qint64(d.vid().v);
+					o["title"] = qs(d.vtitle());
+					if (const auto u = d.vusername()) {
+						o["username"] = qs(*u);
+					}
+					list.append(o);
+				}, [](const auto &) {
+				});
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["channels"] = list;
+			value["count"] = list.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
 } // namespace MCP
