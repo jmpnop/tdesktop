@@ -1904,6 +1904,36 @@ void Server::registerTools() {
 			}
 		},
 		Tool{
+			"edit_message_caption",
+			"Edit a media message's caption, preserving formatting (entities or parse_mode)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID of the message."}}},
+					{"message_id", QJsonObject{{"type", "integer"}, {"description", "ID of the media message whose caption to edit."}}},
+					{"caption", QJsonObject{{"type", "string"}, {"description", "New caption text."}}},
+					{"parse_mode", QJsonObject{{"type", "string"}, {"description", "markdown or html; applied when entities is omitted."}}},
+					{"entities", QJsonObject{{"type", "array"}, {"description", "Explicit MTProto entities; overrides parse_mode."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "caption"}}
+			}
+		},
+		Tool{
+			"save_fact_check",
+			"Set or edit the fact-check note on a message (fact-check admins only)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID of the message."}}},
+					{"message_id", QJsonObject{{"type", "integer"}, {"description", "ID of the message to fact-check."}}},
+					{"text", QJsonObject{{"type", "string"}, {"description", "Fact-check note text."}}},
+					{"parse_mode", QJsonObject{{"type", "string"}, {"description", "markdown or html; applied when entities is omitted."}}},
+					{"entities", QJsonObject{{"type", "array"}, {"description", "Explicit MTProto entities; overrides parse_mode."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "message_id", "text"}}
+			}
+		},
+		Tool{
 			"delete_message",
 			"Delete a message",
 			QJsonObject{

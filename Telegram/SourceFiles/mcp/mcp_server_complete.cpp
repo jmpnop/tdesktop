@@ -1553,6 +1553,8 @@ void Server::initializeToolHandlers() {
 
 	// MESSAGE OPERATIONS
 	_toolHandlers["edit_message"] = [this](const QJsonObject &args) { return toolEditMessage(args); };
+	_toolHandlers["edit_message_caption"] = [this](const QJsonObject &args) { return toolEditMessageCaption(args); };
+	_toolHandlers["save_fact_check"] = [this](const QJsonObject &args) { return toolSaveFactCheck(args); };
 	_toolHandlers["rename_chat"] = [this](const QJsonObject &args) { return toolRenameChatTitle(args); };
 	_toolHandlers["delete_message"] = [this](const QJsonObject &args) { return toolDeleteMessage(args); };
 	_toolHandlers["forward_message"] = [this](const QJsonObject &args) { return toolForwardMessage(args); };

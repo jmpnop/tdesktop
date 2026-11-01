@@ -254,6 +254,8 @@ private:
 
 	// Message operations (6 tools)
 	QJsonObject toolEditMessage(const QJsonObject &args);
+	QJsonObject toolEditMessageCaption(const QJsonObject &args);
+	QJsonObject toolSaveFactCheck(const QJsonObject &args);
 	QJsonObject toolDeleteMessage(const QJsonObject &args);
 	QJsonObject toolForwardMessage(const QJsonObject &args);
 	QJsonObject toolPinMessage(const QJsonObject &args);

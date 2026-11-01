@@ -12,6 +12,8 @@
 #include "base/random.h" // base::RandomValue for the sendMedia random_id
 #include "api/api_polls.h" // Api::Polls::sendVotes for vote_poll
 #include "data/data_poll.h" // PollData/PollAnswer for poll create/vote/results
+#include "api/api_editing.h" // Api::EditCaption for edit_message_caption
+#include "data/components/factchecks.h" // Data::Factchecks::save for save_fact_check
 
 namespace MCP {
 
@@ -3035,5 +3037,81 @@ QJsonObject Server::toolGetUserInfo(const QJsonObject &args) {
 	return userInfo;
 }
 
+
+// Wave 2 - messaging write-side (real API).
+QJsonObject Server::toolEditMessageCaption(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toVariant().toLongLong();
+	const auto caption = args["caption"].toString();
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto entities = args.value("entities").toArray();
+	if (!chatId || !messageId) {
+		return toolError("chat_id and message_id are required");
+	}
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto item = _session->data().message(peer->id, MsgId(messageId));
+	if (!item) {
+		return toolError("Message not found");
+	}
+	const auto resolved = ResolveFormatting(caption, parseMode, entities);
+	return awaitMtp([&](auto done, auto fail) {
+		Api::EditCaption(item, resolved, Api::SendOptions(), [=] {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["message_id"] = messageId;
+			done(value);
+		}, [=](const QString &error) {
+			fail(error);
+		});
+	});
+}
+
+QJsonObject Server::toolSaveFactCheck(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toVariant().toLongLong();
+	const auto text = args["text"].toString();
+	const auto parseMode = args.value("parse_mode").toString();
+	const auto entities = args.value("entities").toArray();
+	if (!chatId || !messageId) {
+		return toolError("chat_id and message_id are required");
+	}
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto item = _session->data().message(peer->id, MsgId(messageId));
+	if (!item) {
+		return toolError("Message not found");
+	}
+	if (!_session->factchecks().canEdit(item)) {
+		return toolError("Fact-checks can only be set here by a fact-check "
+			"admin for the message's country");
+	}
+	const auto resolved = ResolveFormatting(text, parseMode, entities);
+	const auto fullId = FullMsgId(peer->id, MsgId(messageId));
+	return awaitMtp([&](auto done, auto fail) {
+		_session->factchecks().save(fullId, resolved, [=](QString error) {
+			if (!error.isEmpty()) {
+				fail(error);
+				return;
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["message_id"] = messageId;
+			done(value);
+		});
+	});
+}
 
 } // namespace MCP
