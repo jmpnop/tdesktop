@@ -3196,6 +3196,43 @@ QJsonObject Server::toolGetGlobalPrivacy(const QJsonObject &args) {
 	});
 }
 
+QJsonObject Server::toolGetConnectedBots(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPaccount_GetConnectedBots(
+		)).done([=](const MTPaccount_ConnectedBots &result) {
+			const auto &d = result.data();
+			_session->data().processUsers(d.vusers());
+			auto list = QJsonArray();
+			for (const auto &bot : d.vconnected_bots().v) {
+				const auto &b = bot.data();
+				auto o = QJsonObject();
+				o["bot_id"] = qint64(b.vbot_id().v);
+				if (const auto device = b.vdevice()) {
+					o["device"] = qs(*device);
+				}
+				if (const auto date = b.vdate()) {
+					o["connected_date"] = qint64(date->v);
+				}
+				if (const auto loc = b.vlocation()) {
+					o["location"] = qs(*loc);
+				}
+				list.append(o);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["connected_bots"] = list;
+			value["count"] = list.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
 QJsonObject Server::toolDisconnectWebsite(const QJsonObject &args) {
 	if (!_session) {
 		return toolError("No active session");

@@ -1651,6 +1651,8 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["process_join_request"] = [this](const QJsonObject &args) { return toolProcessJoinRequest(args); };
 	_toolHandlers["delete_invite_link"] = [this](const QJsonObject &args) { return toolDeleteInviteLink(args); };
 	_toolHandlers["get_recommended_channels"] = [this](const QJsonObject &args) { return toolGetRecommendedChannels(args); };
+	_toolHandlers["search_peers"] = [this](const QJsonObject &args) { return toolSearchPeers(args); };
+	_toolHandlers["get_connected_bots"] = [this](const QJsonObject &args) { return toolGetConnectedBots(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };

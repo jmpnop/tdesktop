@@ -3384,6 +3384,23 @@ void Server::registerTools() {
 				{"required", QJsonArray{}}
 			}
 		},
+		Tool{
+			"search_peers",
+			"Search Telegram globally for users and channels by name or username",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"query", QJsonObject{{"type", "string"}, {"description", "Name or username to search for."}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum results to return (default 20, max 50)."}}},
+				}},
+				{"required", QJsonArray{"query"}}
+			}
+		},
+		Tool{
+			"get_connected_bots",
+			"List business bots connected to this account (Telegram Business)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

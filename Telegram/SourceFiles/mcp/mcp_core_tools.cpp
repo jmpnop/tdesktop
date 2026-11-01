@@ -3073,6 +3073,64 @@ QJsonObject Server::toolEditMessageCaption(const QJsonObject &args) {
 	});
 }
 
+QJsonObject Server::toolSearchPeers(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto query = args["query"].toString();
+	if (query.isEmpty()) {
+		return toolError("query is required");
+	}
+	const auto limit = clampLimit(args.value("limit").toInt(20), 20, 50);
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPcontacts_Search(
+			MTP_flags(0),
+			MTP_string(query),
+			MTP_int(limit)
+		)).done([=](const MTPcontacts_Found &result) {
+			const auto &d = result.data();
+			_session->data().processUsers(d.vusers());
+			_session->data().processChats(d.vchats());
+			auto results = QJsonArray();
+			const auto add = [&](const MTPPeer &p) {
+				const auto peer = _session->data().peerLoaded(peerFromMTP(p));
+				if (!peer) {
+					return;
+				}
+				auto o = QJsonObject();
+				o["id"] = qint64(peer->id.value);
+				o["name"] = peer->name();
+				const auto username = peer->username();
+				if (!username.isEmpty()) {
+					o["username"] = username;
+				}
+				o["type"] = peer->isUser()
+					? "user"
+					: peer->isBroadcast()
+					? "channel"
+					: peer->isChannel()
+					? "supergroup"
+					: "chat";
+				results.append(o);
+			};
+			for (const auto &p : d.vmy_results().v) {
+				add(p);
+			}
+			for (const auto &p : d.vresults().v) {
+				add(p);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["query"] = query;
+			value["results"] = results;
+			value["count"] = results.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
 QJsonObject Server::toolSaveFactCheck(const QJsonObject &args) {
 	if (!_session) {
 		return toolError("No active session");

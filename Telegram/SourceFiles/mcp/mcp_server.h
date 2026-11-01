@@ -364,6 +364,8 @@ private:
 	QJsonObject toolProcessJoinRequest(const QJsonObject &args);
 	QJsonObject toolDeleteInviteLink(const QJsonObject &args);
 	QJsonObject toolGetRecommendedChannels(const QJsonObject &args);
+	QJsonObject toolSearchPeers(const QJsonObject &args);
+	QJsonObject toolGetConnectedBots(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);
