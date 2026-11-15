@@ -1472,7 +1472,8 @@ QJsonObject Server::sendInputMedia(
 			MTPint(), // quote_offset
 			MTPInputPeer(), // monoforum_peer_id
 			MTPint(), // todo_item_id
-			MTPbytes()) // poll_option
+			MTPbytes(), // poll_option
+			MTPVector<MTPRichText>()) // quote_rich
 		: MTPInputReplyTo();
 
 	using Flag = MTPmessages_sendMedia::Flag;
@@ -2315,7 +2316,7 @@ QJsonObject Server::toolSaveDraft(const QJsonObject &args) {
 		? MTP_inputReplyToMessage(
 			MTP_flags(0), MTP_int(int(replyToId)), MTPint(), MTPInputPeer(),
 			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(),
-			MTPInputPeer(), MTPint(), MTPbytes())
+			MTPInputPeer(), MTPint(), MTPbytes(), MTPVector<MTPRichText>())
 		: MTPInputReplyTo();
 	return awaitMtp([&](auto done, auto fail) {
 		_session->api().request(MTPmessages_SaveDraft(
@@ -2768,7 +2769,7 @@ QJsonObject Server::toolSendInlineBotResult(const QJsonObject &args) {
 		? MTP_inputReplyToMessage(
 			MTP_flags(0), MTP_int(int(replyToId)), MTPint(), MTPInputPeer(),
 			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(),
-			MTPInputPeer(), MTPint(), MTPbytes())
+			MTPInputPeer(), MTPint(), MTPbytes(), MTPVector<MTPRichText>())
 		: MTPInputReplyTo();
 	const auto randomId = base::RandomValue<uint64>();
 	return awaitMtp([&](auto done, auto fail) {
