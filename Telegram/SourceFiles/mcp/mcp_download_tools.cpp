@@ -147,7 +147,13 @@ QJsonObject Server::toolListDownloads(const QJsonObject &args) {
 		loaded.append(entry);
 	}
 
-	const auto progress = manager.loadingProgress();
+	// The producer is a variable's value(): it emits the current one at once.
+	auto progress = ::Data::DownloadProgress();
+	auto lifetime = rpl::lifetime();
+	manager.loadingProgressValue(
+	) | rpl::take(1) | rpl::on_next([&](::Data::DownloadProgress current) {
+		progress = current;
+	}, lifetime);
 	auto value = QJsonObject();
 	value["success"] = true;
 	value["loading_count"] = loading.size();
