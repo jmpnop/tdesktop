@@ -13,6 +13,7 @@
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "api/api_text_entities.h"
+#include "api/api_invite_links.h"
 
 #include <QtCore/QEventLoop>
 
@@ -1231,6 +1232,317 @@ QJsonObject Server::toolGetRecommendedChannels(const QJsonObject &args) {
 			value["success"] = true;
 			value["channels"] = list;
 			value["count"] = list.size();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+// Wave 6 - invite-link create/edit/revoke/list and pending join requests.
+namespace {
+
+[[nodiscard]] QJsonObject DescribeInvite(const MTPExportedChatInvite &invite) {
+	auto o = QJsonObject();
+	invite.match([&](const MTPDchatInviteExported &d) {
+		o["link"] = qs(d.vlink());
+		o["admin_id"] = qint64(d.vadmin_id().v);
+		o["date"] = d.vdate().v;
+		o["revoked"] = d.is_revoked();
+		o["permanent"] = d.is_permanent();
+		o["request_needed"] = d.is_request_needed();
+		o["usage"] = d.vusage().value_or_empty();
+		o["requested"] = d.vrequested().value_or_empty();
+		if (const auto title = d.vtitle()) {
+			o["title"] = qs(*title);
+		}
+		if (const auto expire = d.vexpire_date()) {
+			o["expire_date"] = expire->v;
+		}
+		if (const auto limit = d.vusage_limit()) {
+			o["usage_limit"] = limit->v;
+		}
+		if (d.vsubscription_pricing()) {
+			o["is_subscription"] = true;
+		}
+	}, [&](const MTPDchatInvitePublicJoinRequests &) {
+		o["public_join_requests"] = true;
+	});
+	return o;
+}
+
+// The admin UI's link list lives in Api::InviteLinks; refetch it after writes so it is not stale.
+void RefreshInviteLinks(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> peer) {
+	session->api().inviteLinks().requestMyLinks(peer);
+}
+
+} // namespace
+
+QJsonObject Server::toolCreateInviteLink(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(
+		PeerId(args["chat_id"].toVariant().toLongLong()));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto title = args.value("title").toString();
+	const auto expireDate = args.value("expire_date").toInt();
+	const auto usageLimit = args.value("usage_limit").toInt();
+	const auto requestNeeded = args.value("request_needed").toBool();
+	if (requestNeeded && usageLimit) {
+		return toolError(
+			"usage_limit cannot be combined with request_needed");
+	}
+	using Flag = MTPmessages_ExportChatInvite::Flag;
+	const auto flags = (title.isEmpty() ? Flag(0) : Flag::f_title)
+		| (expireDate ? Flag::f_expire_date : Flag(0))
+		| (usageLimit ? Flag::f_usage_limit : Flag(0))
+		| (requestNeeded ? Flag::f_request_needed : Flag(0));
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_ExportChatInvite(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_int(expireDate),
+			MTP_int(usageLimit),
+			MTP_string(title),
+			MTP_starsSubscriptionPricing(MTP_int(0), MTP_long(0))
+		)).done([=](const MTPExportedChatInvite &result) {
+			RefreshInviteLinks(session, peer);
+			auto value = DescribeInvite(result);
+			value["success"] = true;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolEditInviteLink(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto link = args["link"].toString();
+	if (link.isEmpty()) {
+		return toolError("link is required");
+	}
+	const auto peer = resolvePeer(
+		PeerId(args["chat_id"].toVariant().toLongLong()));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	// Only the fields the caller names are sent; the rest keep their current value.
+	using Flag = MTPmessages_EditExportedChatInvite::Flag;
+	auto flags = MTPmessages_EditExportedChatInvite::Flags(0);
+	if (args.contains("title")) flags |= Flag::f_title;
+	if (args.contains("expire_date")) flags |= Flag::f_expire_date;
+	if (args.contains("usage_limit")) flags |= Flag::f_usage_limit;
+	if (args.contains("request_needed")) flags |= Flag::f_request_needed;
+	if (flags == MTPmessages_EditExportedChatInvite::Flags(0)) {
+		return toolError("Nothing to change: pass at least one of title, "
+			"expire_date, usage_limit, request_needed");
+	}
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_EditExportedChatInvite(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_string(link),
+			MTP_int(args.value("expire_date").toInt()),
+			MTP_int(args.value("usage_limit").toInt()),
+			MTP_bool(args.value("request_needed").toBool()),
+			MTP_string(args.value("title").toString())
+		)).done([=](const MTPmessages_ExportedChatInvite &result) {
+			auto value = QJsonObject();
+			result.match([&](const auto &data) {
+				session->data().processUsers(data.vusers());
+				value = DescribeInvite(data.vinvite());
+			});
+			RefreshInviteLinks(session, peer);
+			value["success"] = true;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolRevokeInviteLink(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto link = args["link"].toString();
+	if (link.isEmpty()) {
+		return toolError("link is required");
+	}
+	const auto peer = resolvePeer(
+		PeerId(args["chat_id"].toVariant().toLongLong()));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	using Flag = MTPmessages_EditExportedChatInvite::Flag;
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_EditExportedChatInvite(
+			MTP_flags(Flag::f_revoked),
+			peer->input(),
+			MTP_string(link),
+			MTPint(),
+			MTPint(),
+			MTP_bool(false),
+			MTPstring()
+		)).done([=](const MTPmessages_ExportedChatInvite &result) {
+			auto value = QJsonObject();
+			result.match([&](const MTPDmessages_exportedChatInvite &data) {
+				session->data().processUsers(data.vusers());
+				value = DescribeInvite(data.vinvite());
+			}, [&](const MTPDmessages_exportedChatInviteReplaced &data) {
+				// Revoking the permanent link makes Telegram issue a new one in its place.
+				session->data().processUsers(data.vusers());
+				value = DescribeInvite(data.vinvite());
+				value["replacement"] = DescribeInvite(data.vnew_invite());
+			});
+			RefreshInviteLinks(session, peer);
+			value["success"] = true;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolListInviteLinks(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(
+		PeerId(args["chat_id"].toVariant().toLongLong()));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	auto admin = MTP_inputUserSelf();
+	if (const auto adminId = args.value("admin_id").toVariant().toLongLong()) {
+		const auto adminPeer = resolvePeer(PeerId(adminId));
+		const auto user = adminPeer ? adminPeer->asUser() : nullptr;
+		if (!user) {
+			return toolError("Admin user not found");
+		}
+		admin = user->inputUser();
+	}
+	const auto limit = std::clamp(args.value("limit").toInt(50), 1, 100);
+	const auto offsetDate = args.value("offset_date").toInt();
+	const auto offsetLink = args.value("offset_link").toString();
+	using Flag = MTPmessages_GetExportedChatInvites::Flag;
+	const auto flags = (args.value("revoked").toBool()
+			? Flag::f_revoked
+			: Flag(0))
+		| (offsetLink.isEmpty() ? Flag(0) : Flag::f_offset_link);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetExportedChatInvites(
+			MTP_flags(flags),
+			peer->input(),
+			admin,
+			MTP_int(offsetDate),
+			MTP_string(offsetLink),
+			MTP_int(limit)
+		)).done([=](const MTPmessages_ExportedChatInvites &result) {
+			const auto &data = result.data();
+			session->data().processUsers(data.vusers());
+			auto list = QJsonArray();
+			auto last = QJsonObject();
+			for (const auto &invite : data.vinvites().v) {
+				last = DescribeInvite(invite);
+				list.append(last);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["total"] = data.vcount().v;
+			value["invites"] = list;
+			// Pass both back as offset_date/offset_link to get the next page.
+			if (list.size() == limit && last.contains("link")) {
+				value["next_offset_date"] = last["date"];
+				value["next_offset_link"] = last["link"];
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolListJoinRequests(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(
+		PeerId(args["chat_id"].toVariant().toLongLong()));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto link = args.value("link").toString();
+	const auto query = args.value("query").toString();
+	const auto limit = std::clamp(args.value("limit").toInt(50), 1, 100);
+	const auto offsetDate = args.value("offset_date").toInt();
+	auto offsetUser = MTP_inputUserEmpty();
+	if (const auto id = args.value("offset_user_id").toVariant().toLongLong()) {
+		const auto offsetPeer = resolvePeer(PeerId(id));
+		const auto user = offsetPeer ? offsetPeer->asUser() : nullptr;
+		if (!user) {
+			return toolError("offset_user_id not found");
+		}
+		offsetUser = user->inputUser();
+	}
+	using Flag = MTPmessages_GetChatInviteImporters::Flag;
+	const auto flags = Flag::f_requested
+		| (link.isEmpty() ? Flag(0) : Flag::f_link)
+		| (query.isEmpty() ? Flag(0) : Flag::f_q);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPmessages_GetChatInviteImporters(
+			MTP_flags(flags),
+			peer->input(),
+			MTP_string(link),
+			MTP_string(query),
+			MTP_int(offsetDate),
+			offsetUser,
+			MTP_int(limit)
+		)).done([=](const MTPmessages_ChatInviteImporters &result) {
+			const auto &data = result.data();
+			session->data().processUsers(data.vusers());
+			auto list = QJsonArray();
+			auto last = QJsonObject();
+			for (const auto &importer : data.vimporters().v) {
+				const auto &d = importer.data();
+				auto o = QJsonObject();
+				const auto user = session->data().user(d.vuser_id());
+				o["user_id"] = qint64(user->id.value);
+				o["name"] = user->name();
+				if (const auto username = user->username()
+					; !username.isEmpty()) {
+					o["username"] = username;
+				}
+				o["date"] = d.vdate().v;
+				if (const auto about = d.vabout()) {
+					o["about"] = qs(*about);
+				}
+				o["via_chatlist"] = d.is_via_chatlist();
+				last = o;
+				list.append(o);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["total"] = data.vcount().v;
+			value["requests"] = list;
+			// Pass both back as offset_date/offset_user_id to get the next page.
+			if (list.size() == limit) {
+				value["next_offset_date"] = last["date"];
+				value["next_offset_user_id"] = last["user_id"];
+			}
 			done(value);
 		}).fail([=](const MTP::Error &error) {
 			fail(error.type());

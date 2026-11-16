@@ -3401,6 +3401,81 @@ void Server::registerTools() {
 			"List business bots connected to this account (Telegram Business)",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
+		Tool{
+			"create_invite_link",
+			"Create an additional invite link for a channel or group you administer",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"title", QJsonObject{{"type", "string"}, {"description", "Label shown to admins only."}}},
+					{"expire_date", QJsonObject{{"type", "integer"}, {"description", "Unix time the link stops working; omit for no expiry."}}},
+					{"usage_limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of joins; omit for unlimited. Not allowed with request_needed."}}},
+					{"request_needed", QJsonObject{{"type", "boolean"}, {"description", "Joins via this link need admin approval (see list_join_requests)."}}},
+				}},
+				{"required", QJsonArray{"chat_id"}}
+			}
+		},
+		Tool{
+			"edit_invite_link",
+			"Change an invite link's title, expiry, usage limit or approval requirement; omitted fields keep their value",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"link", QJsonObject{{"type", "string"}, {"description", "The invite link URL to edit."}}},
+					{"title", QJsonObject{{"type", "string"}, {"description", "New label; empty string clears it."}}},
+					{"expire_date", QJsonObject{{"type", "integer"}, {"description", "New expiry as Unix time; 0 removes the expiry."}}},
+					{"usage_limit", QJsonObject{{"type", "integer"}, {"description", "New join limit; 0 removes the limit."}}},
+					{"request_needed", QJsonObject{{"type", "boolean"}, {"description", "Whether joins need admin approval."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "link"}}
+			}
+		},
+		Tool{
+			"revoke_invite_link",
+			"Revoke an invite link so it stops working (irreversible); revoking the primary link returns its replacement",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"link", QJsonObject{{"type", "string"}, {"description", "The invite link URL to revoke."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "link"}}
+			}
+		},
+		Tool{
+			"list_invite_links",
+			"List invite links of a channel or group created by an admin (yourself by default)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"admin_id", QJsonObject{{"type", "integer"}, {"description", "Admin whose links to list; omit for your own."}}},
+					{"revoked", QJsonObject{{"type", "boolean"}, {"description", "List revoked links instead of active ones."}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"description", "Page size (default 50, max 100)."}}},
+					{"offset_date", QJsonObject{{"type", "integer"}, {"description", "next_offset_date from the previous page."}}},
+					{"offset_link", QJsonObject{{"type", "string"}, {"description", "next_offset_link from the previous page."}}},
+				}},
+				{"required", QJsonArray{"chat_id"}}
+			}
+		},
+		Tool{
+			"list_join_requests",
+			"List pending requests to join a channel or group; approve or decline them with process_join_request",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+					{"link", QJsonObject{{"type", "string"}, {"description", "Only requests that came through this invite link."}}},
+					{"query", QJsonObject{{"type", "string"}, {"description", "Filter requesters by name or username."}}},
+					{"limit", QJsonObject{{"type", "integer"}, {"description", "Page size (default 50, max 100)."}}},
+					{"offset_date", QJsonObject{{"type", "integer"}, {"description", "next_offset_date from the previous page."}}},
+					{"offset_user_id", QJsonObject{{"type", "integer"}, {"description", "next_offset_user_id from the previous page."}}},
+				}},
+				{"required", QJsonArray{"chat_id"}}
+			}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

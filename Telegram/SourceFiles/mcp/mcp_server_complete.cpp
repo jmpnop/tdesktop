@@ -1653,6 +1653,11 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_recommended_channels"] = [this](const QJsonObject &args) { return toolGetRecommendedChannels(args); };
 	_toolHandlers["search_peers"] = [this](const QJsonObject &args) { return toolSearchPeers(args); };
 	_toolHandlers["get_connected_bots"] = [this](const QJsonObject &args) { return toolGetConnectedBots(args); };
+	_toolHandlers["create_invite_link"] = [this](const QJsonObject &args) { return toolCreateInviteLink(args); };
+	_toolHandlers["edit_invite_link"] = [this](const QJsonObject &args) { return toolEditInviteLink(args); };
+	_toolHandlers["revoke_invite_link"] = [this](const QJsonObject &args) { return toolRevokeInviteLink(args); };
+	_toolHandlers["list_invite_links"] = [this](const QJsonObject &args) { return toolListInviteLinks(args); };
+	_toolHandlers["list_join_requests"] = [this](const QJsonObject &args) { return toolListJoinRequests(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };
