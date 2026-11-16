@@ -14,6 +14,7 @@
 #include "data/data_forum_topic.h"
 #include "api/api_text_entities.h"
 #include "api/api_invite_links.h"
+#include "api/api_peer_photo.h"
 
 #include <QtCore/QEventLoop>
 
@@ -1542,6 +1543,81 @@ QJsonObject Server::toolListJoinRequests(const QJsonObject &args) {
 			if (list.size() == limit) {
 				value["next_offset_date"] = last["date"];
 				value["next_offset_user_id"] = last["user_id"];
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+// Wave 7 - chat photo and boosts status.
+QJsonObject Server::toolSetChatPhoto(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	// Api::PeerPhoto reports success only, so a refused upload would surface as a timeout; check rights first.
+	const auto chat = peer->asChat();
+	const auto channel = peer->asChannel();
+	if (!(chat && chat->canEditInformation())
+		&& !(channel && channel->canEditInformation())) {
+		return toolError(
+			"Not a group or channel where you can change the photo");
+	}
+	const auto path = args["path"].toString();
+	auto image = QImage(path);
+	if (image.isNull()) {
+		return toolError(QString("Cannot read an image from '%1'").arg(path));
+	}
+	const auto api = &_session->api();
+	return awaitMtp([&](auto done, auto fail) {
+		api->peerPhoto().upload(
+			peer,
+			Api::PeerPhoto::UserPhoto{ .image = std::move(image) },
+			[=] {
+				auto value = QJsonObject();
+				value["success"] = true;
+				value["chat_id"] = chatId;
+				done(value);
+			});
+	}, 60000);
+}
+
+QJsonObject Server::toolGetBoostsStatus(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(PeerId(chatId));
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		_session->api().request(MTPpremium_GetBoostsStatus(
+			peer->input()
+		)).done([=](const MTPpremium_BoostsStatus &result) {
+			const auto &data = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["level"] = data.vlevel().v;
+			value["boosts"] = data.vboosts().v;
+			value["current_level_boosts"] = data.vcurrent_level_boosts().v;
+			if (const auto next = data.vnext_level_boosts()) {
+				value["next_level_boosts"] = next->v;
+			}
+			value["gift_boosts"] = data.vgift_boosts().value_or_empty();
+			value["boost_url"] = qs(data.vboost_url());
+			value["my_boost"] = data.is_my_boost();
+			if (const auto audience = data.vpremium_audience()) {
+				const auto &percent = audience->data();
+				value["premium_audience_part"] = percent.vpart().v;
+				value["premium_audience_total"] = percent.vtotal().v;
 			}
 			done(value);
 		}).fail([=](const MTP::Error &error) {

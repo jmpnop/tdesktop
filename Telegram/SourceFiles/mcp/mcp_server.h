@@ -371,6 +371,12 @@ private:
 	QJsonObject toolRevokeInviteLink(const QJsonObject &args);
 	QJsonObject toolListInviteLinks(const QJsonObject &args);
 	QJsonObject toolListJoinRequests(const QJsonObject &args);
+	QJsonObject toolCreateForumTopic(const QJsonObject &args);
+	QJsonObject toolEditForumTopic(const QJsonObject &args);
+	QJsonObject toolPinForumTopic(const QJsonObject &args);
+	QJsonObject toolDeleteForumTopic(const QJsonObject &args);
+	QJsonObject toolSetChatPhoto(const QJsonObject &args);
+	QJsonObject toolGetBoostsStatus(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);

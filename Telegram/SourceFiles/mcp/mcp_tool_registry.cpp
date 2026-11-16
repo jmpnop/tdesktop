@@ -3476,6 +3476,84 @@ void Server::registerTools() {
 				{"required", QJsonArray{"chat_id"}}
 			}
 		},
+		Tool{
+			"create_forum_topic",
+			"Create a topic in a forum supergroup; returns its topic_id",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Forum supergroup ID."}}},
+					{"title", QJsonObject{{"type", "string"}, {"description", "Topic title."}}},
+					{"icon_color", QJsonObject{{"type", "integer"}, {"description", "Icon color as 0xRRGGBB; omit to let Telegram choose."}}},
+					{"icon_emoji_id", QJsonObject{{"type", "integer"}, {"description", "Custom emoji document ID for the icon (Premium)."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "title"}}
+			}
+		},
+		Tool{
+			"edit_forum_topic",
+			"Rename a forum topic, change its icon, close/reopen it, or hide/show the General topic; omitted fields keep their value",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Forum supergroup ID."}}},
+					{"topic_id", QJsonObject{{"type", "integer"}, {"description", "Topic ID (from list_topics)."}}},
+					{"title", QJsonObject{{"type", "string"}, {"description", "New title."}}},
+					{"icon_emoji_id", QJsonObject{{"type", "integer"}, {"description", "New custom emoji icon ID; 0 removes it."}}},
+					{"closed", QJsonObject{{"type", "boolean"}, {"description", "true closes the topic to new messages, false reopens it."}}},
+					{"hidden", QJsonObject{{"type", "boolean"}, {"description", "General topic only: hide or show it."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "topic_id"}}
+			}
+		},
+		Tool{
+			"pin_forum_topic",
+			"Pin or unpin a topic at the top of a forum",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Forum supergroup ID."}}},
+					{"topic_id", QJsonObject{{"type", "integer"}, {"description", "Topic ID (from list_topics)."}}},
+					{"pinned", QJsonObject{{"type", "boolean"}, {"description", "true to pin (default), false to unpin."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "topic_id"}}
+			}
+		},
+		Tool{
+			"delete_forum_topic",
+			"Delete a forum topic and all of its messages for everyone (irreversible)",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Forum supergroup ID."}}},
+					{"topic_id", QJsonObject{{"type", "integer"}, {"description", "Topic ID (from list_topics); the General topic cannot be deleted."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "topic_id"}}
+			}
+		},
+		Tool{
+			"set_chat_photo",
+			"Set the photo of a group or channel you can edit, from an image file on this machine",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID."}}},
+					{"path", QJsonObject{{"type", "string"}, {"description", "Absolute path to a JPEG/PNG/WebP image."}}},
+				}},
+				{"required", QJsonArray{"chat_id", "path"}}
+			}
+		},
+		Tool{
+			"get_boosts_status",
+			"Boost level, boost counts, progress to the next level and the boost link of a channel or group",
+			QJsonObject{
+				{"type", "object"},
+				{"properties", QJsonObject{
+					{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel or group ID."}}},
+				}},
+				{"required", QJsonArray{"chat_id"}}
+			}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

@@ -1658,6 +1658,12 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["revoke_invite_link"] = [this](const QJsonObject &args) { return toolRevokeInviteLink(args); };
 	_toolHandlers["list_invite_links"] = [this](const QJsonObject &args) { return toolListInviteLinks(args); };
 	_toolHandlers["list_join_requests"] = [this](const QJsonObject &args) { return toolListJoinRequests(args); };
+	_toolHandlers["create_forum_topic"] = [this](const QJsonObject &args) { return toolCreateForumTopic(args); };
+	_toolHandlers["edit_forum_topic"] = [this](const QJsonObject &args) { return toolEditForumTopic(args); };
+	_toolHandlers["pin_forum_topic"] = [this](const QJsonObject &args) { return toolPinForumTopic(args); };
+	_toolHandlers["delete_forum_topic"] = [this](const QJsonObject &args) { return toolDeleteForumTopic(args); };
+	_toolHandlers["set_chat_photo"] = [this](const QJsonObject &args) { return toolSetChatPhoto(args); };
+	_toolHandlers["get_boosts_status"] = [this](const QJsonObject &args) { return toolGetBoostsStatus(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };
