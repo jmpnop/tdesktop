@@ -22,6 +22,8 @@
 #include "calls/calls_call.h"
 #include "calls/group/calls_group_call.h"
 #include "core/application.h"
+#include "data/data_todo_list.h"
+#include "data/stickers/data_stickers.h"
 
 #include <QtCore/QEventLoop>
 
@@ -2130,6 +2132,360 @@ QJsonObject Server::toolGetGroupCallRtmpUrl(const QJsonObject &args) {
 			value["url"] = qs(r.vurl());
 			value["key"] = qs(r.vkey());
 			value["revoked"] = revoke;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+// Wave 11 - reporting, faved stickers / saved GIFs, to-do lists.
+namespace {
+
+[[nodiscard]] std::optional<MTPReportReason> ReportReasonToTL(
+		const QString &reason) {
+	if (reason == "spam") return MTP_inputReportReasonSpam();
+	if (reason == "violence") return MTP_inputReportReasonViolence();
+	if (reason == "pornography") return MTP_inputReportReasonPornography();
+	if (reason == "child_abuse") return MTP_inputReportReasonChildAbuse();
+	if (reason == "copyright") return MTP_inputReportReasonCopyright();
+	if (reason == "geo_irrelevant") return MTP_inputReportReasonGeoIrrelevant();
+	if (reason == "fake") return MTP_inputReportReasonFake();
+	if (reason == "illegal_drugs") return MTP_inputReportReasonIllegalDrugs();
+	if (reason == "personal_details") {
+		return MTP_inputReportReasonPersonalDetails();
+	}
+	if (reason == "other") return MTP_inputReportReasonOther();
+	return std::nullopt;
+}
+
+[[nodiscard]] MTPVector<MTPTodoItem> TodoItemsToTL(
+		const QJsonArray &items,
+		int firstId) {
+	auto result = QVector<MTPTodoItem>();
+	for (const auto &item : items) {
+		result.push_back(MTP_todoItem(
+			MTP_int(firstId++),
+			MTP_textWithEntities(
+				MTP_string(item.toString()),
+				MTP_vector<MTPMessageEntity>())));
+	}
+	return MTP_vector(result);
+}
+
+[[nodiscard]] QVector<MTPint> IdsToTL(const QJsonArray &ids) {
+	auto result = QVector<MTPint>();
+	for (const auto &id : ids) {
+		result.push_back(MTP_int(id.toInt()));
+	}
+	return result;
+}
+
+} // namespace
+
+QJsonObject Server::toolReportPeer(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("No chat %1 in this client's data").arg(chatId));
+	}
+	const auto reason = ReportReasonToTL(args["reason"].toString());
+	if (!reason) {
+		return toolError("reason must be one of: spam, violence, pornography, "
+			"child_abuse, copyright, geo_irrelevant, fake, illegal_drugs, "
+			"personal_details, other");
+	}
+	const auto comment = args.value("comment").toString();
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPaccount_ReportPeer(
+			peer->input(),
+			*reason,
+			MTP_string(comment)
+		)).done([=](const MTPBool &result) {
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["chat_id"] = chatId;
+			value["reason"] = args["reason"].toString();
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolReportMessages(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("No chat %1 in this client's data").arg(chatId));
+	}
+	const auto ids = IdsToTL(args["message_ids"].toArray());
+	if (ids.isEmpty()) {
+		return toolError("message_ids is required");
+	}
+	// Telegram walks the reporter through a menu; each answer names the option to send next.
+	const auto option = QByteArray::fromBase64(
+		args.value("option").toString().toLatin1());
+	const auto comment = args.value("comment").toString();
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_Report(
+			peer->input(),
+			MTP_vector(ids),
+			MTP_bytes(option),
+			MTP_string(comment)
+		)).done([=](const MTPReportResult &result) {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			result.match([&](const MTPDreportResultChooseOption &data) {
+				auto options = QJsonArray();
+				for (const auto &entry : data.voptions().v) {
+					const auto &o = entry.data();
+					options.append(QJsonObject{
+						{ "text", qs(o.vtext()) },
+						{ "option", QString::fromLatin1(o.voption().v.toBase64()) },
+					});
+				}
+				value["status"] = "choose_option";
+				value["title"] = qs(data.vtitle());
+				value["options"] = options;
+				value["next_step"] = "Call report_messages again with the same "
+					"message_ids and one of these option values.";
+			}, [&](const MTPDreportResultAddComment &data) {
+				value["status"] = "add_comment";
+				value["comment_optional"] = data.is_optional();
+				value["option"] = QString::fromLatin1(
+					data.voption().v.toBase64());
+				value["next_step"] = "Call report_messages again with this "
+					"option and a comment.";
+			}, [&](const MTPDreportResultReported &) {
+				value["status"] = "reported";
+			});
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolFaveSticker(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(args["chat_id"].toVariant().toLongLong());
+	const auto item = peer
+		? _session->data().message(peer->id, MsgId(args["message_id"].toInt()))
+		: nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto document = media ? media->document() : nullptr;
+	if (!document || !document->sticker()) {
+		return toolError("That message is not a sticker loaded in this client");
+	}
+	const auto unfave = args.value("unfave").toBool(false);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_FaveSticker(
+			document->mtpInput(),
+			MTP_bool(unfave)
+		)).done([=](const MTPBool &result) {
+			session->api().requestSpecialStickersForce(true, false, false);
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["document_id"] = QString::number(document->id);
+			value["faved"] = !unfave;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSaveGif(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(args["chat_id"].toVariant().toLongLong());
+	const auto item = peer
+		? _session->data().message(peer->id, MsgId(args["message_id"].toInt()))
+		: nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto document = media ? media->document() : nullptr;
+	if (!document || !document->isGifv()) {
+		return toolError("That message is not a GIF loaded in this client");
+	}
+	const auto unsave = args.value("unsave").toBool(false);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_SaveGif(
+			document->mtpInput(),
+			MTP_bool(unsave)
+		)).done([=](const MTPBool &result) {
+			// The saved-GIF list is throttled; clearing the stamp makes this refresh go out now.
+			session->data().stickers().setLastSavedGifsUpdate(0);
+			session->api().updateSavedGifs();
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["document_id"] = QString::number(document->id);
+			value["saved"] = !unsave;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSendTodoList(const QJsonObject &args) {
+	const auto title = args["title"].toString().trimmed();
+	const auto items = args["tasks"].toArray();
+	if (title.isEmpty()) {
+		return toolError("title is required");
+	}
+	if (items.isEmpty() || items.size() > TodoListData::kMaxOptions) {
+		return toolError(QString("tasks must hold 1 to %1 tasks"
+			).arg(TodoListData::kMaxOptions));
+	}
+	using Flag = MTPDtodoList::Flag;
+	const auto flags = (args.value("others_can_append").toBool()
+			? Flag::f_others_can_append
+			: Flag(0))
+		| (args.value("others_can_complete").toBool()
+			? Flag::f_others_can_complete
+			: Flag(0));
+	return sendInputMedia(
+		args["chat_id"].toVariant().toLongLong(),
+		MTP_inputMediaTodo(MTP_todoList(
+			MTP_flags(flags),
+			MTP_textWithEntities(
+				MTP_string(title),
+				MTP_vector<MTPMessageEntity>()),
+			TodoItemsToTL(items, 1))),
+		args.value("reply_to_message_id").toVariant().toLongLong(),
+		args.value("silent").toBool(false),
+		"todo_list");
+}
+
+QJsonObject Server::toolGetTodoList(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toInt();
+	const auto peer = resolvePeer(chatId);
+	const auto item = peer
+		? _session->data().message(peer->id, MsgId(messageId))
+		: nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto todo = media ? media->todolist() : nullptr;
+	if (!todo) {
+		return toolError("That message is not a to-do list loaded in this client");
+	}
+	auto tasks = QJsonArray();
+	for (const auto &task : todo->items) {
+		auto entry = QJsonObject();
+		entry["id"] = task.id;
+		entry["text"] = task.text.text;
+		entry["completed"] = (task.completionDate != 0);
+		if (task.completedBy) {
+			entry["completed_by"] = qint64(task.completedBy->id.value);
+			entry["completed_date"] = qint64(task.completionDate);
+		}
+		tasks.append(entry);
+	}
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["chat_id"] = chatId;
+	value["message_id"] = messageId;
+	value["title"] = todo->title.text;
+	value["others_can_append"] = todo->othersCanAppend();
+	value["others_can_complete"] = todo->othersCanComplete();
+	value["tasks"] = tasks;
+	return value;
+}
+
+QJsonObject Server::toolToggleTodoTasks(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toInt();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("No chat %1 in this client's data").arg(chatId));
+	}
+	const auto completed = IdsToTL(args["completed_ids"].toArray());
+	const auto incompleted = IdsToTL(args["incompleted_ids"].toArray());
+	if (completed.isEmpty() && incompleted.isEmpty()) {
+		return toolError("Pass completed_ids and/or incompleted_ids");
+	}
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_ToggleTodoCompleted(
+			peer->input(),
+			MTP_int(messageId),
+			MTP_vector(completed),
+			MTP_vector(incompleted)
+		)).done([=](const MTPUpdates &result) {
+			session->api().applyUpdates(result);
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["message_id"] = messageId;
+			value["completed_ids"] = args["completed_ids"];
+			value["incompleted_ids"] = args["incompleted_ids"];
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolAppendTodoTasks(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto messageId = args["message_id"].toInt();
+	const auto peer = resolvePeer(chatId);
+	const auto item = peer
+		? _session->data().message(peer->id, MsgId(messageId))
+		: nullptr;
+	const auto media = item ? item->media() : nullptr;
+	const auto todo = media ? media->todolist() : nullptr;
+	if (!todo) {
+		return toolError("That message is not a to-do list loaded in this client");
+	}
+	const auto items = args["tasks"].toArray();
+	if (items.isEmpty()) {
+		return toolError("tasks is required");
+	}
+	// New task ids continue after the highest existing one, as the official client numbers them.
+	auto nextId = 1;
+	for (const auto &task : todo->items) {
+		nextId = std::max(nextId, task.id + 1);
+	}
+	const auto list = TodoItemsToTL(items, nextId);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_AppendTodoList(
+			peer->input(),
+			MTP_int(messageId),
+			list
+		)).done([=](const MTPUpdates &result) {
+			session->api().applyUpdates(result);
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["message_id"] = messageId;
+			value["first_new_id"] = nextId;
+			value["added"] = items.size();
 			done(value);
 		}).fail([=](const MTP::Error &error) {
 			fail(error.type());

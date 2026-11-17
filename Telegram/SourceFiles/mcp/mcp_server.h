@@ -387,6 +387,14 @@ private:
 	QJsonObject toolGetGroupCallParticipants(const QJsonObject &args);
 	QJsonObject toolExportGroupCallInvite(const QJsonObject &args);
 	QJsonObject toolGetGroupCallRtmpUrl(const QJsonObject &args);
+	QJsonObject toolReportPeer(const QJsonObject &args);
+	QJsonObject toolReportMessages(const QJsonObject &args);
+	QJsonObject toolFaveSticker(const QJsonObject &args);
+	QJsonObject toolSaveGif(const QJsonObject &args);
+	QJsonObject toolSendTodoList(const QJsonObject &args);
+	QJsonObject toolGetTodoList(const QJsonObject &args);
+	QJsonObject toolToggleTodoTasks(const QJsonObject &args);
+	QJsonObject toolAppendTodoTasks(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);

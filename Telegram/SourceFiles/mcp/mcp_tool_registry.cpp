@@ -3645,6 +3645,84 @@ void Server::registerTools() {
 			}}, {"required", QJsonArray{"chat_id"}}}
 		},
 
+		Tool{
+			"report_peer",
+			"Report a user, group or channel to Telegram moderators",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"reason", QJsonObject{{"type", "string"}, {"description", "spam, violence, pornography, child_abuse, copyright, geo_irrelevant, fake, illegal_drugs, personal_details or other."}}},
+				{"comment", QJsonObject{{"type", "string"}, {"description", "Optional details for the moderators."}}}
+			}}, {"required", QJsonArray{"chat_id", "reason"}}}
+		},
+		Tool{
+			"report_messages",
+			"Report messages to Telegram moderators; answers with the next menu step until it reports",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Messages to report."}}},
+				{"option", QJsonObject{{"type", "string"}, {"description", "Option value from the previous answer; omit on the first call."}}},
+				{"comment", QJsonObject{{"type", "string"}, {"description", "Comment, when the previous answer asked for one."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_ids"}}}
+		},
+		Tool{
+			"fave_sticker",
+			"Add the sticker in a message to your favorite stickers, or remove it",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID."}}},
+				{"unfave", QJsonObject{{"type", "boolean"}, {"description", "true to remove it from favorites."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_id"}}}
+		},
+		Tool{
+			"save_gif",
+			"Save the GIF in a message to your saved GIFs, or remove it",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID."}}},
+				{"unsave", QJsonObject{{"type", "boolean"}, {"description", "true to remove it from saved GIFs."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_id"}}}
+		},
+		Tool{
+			"send_todo_list",
+			"Send a to-do list (checklist) message",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"title", QJsonObject{{"type", "string"}, {"description", "List title."}}},
+				{"tasks", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Task texts, in order."}}},
+				{"others_can_append", QJsonObject{{"type", "boolean"}, {"description", "Let other members add tasks."}}},
+				{"others_can_complete", QJsonObject{{"type", "boolean"}, {"description", "Let other members tick tasks."}}},
+				{"reply_to_message_id", QJsonObject{{"type", "integer"}, {"description", "Optional message to reply to."}}},
+				{"silent", QJsonObject{{"type", "boolean"}, {"description", "Send without notification."}}}
+			}}, {"required", QJsonArray{"chat_id", "title", "tasks"}}}
+		},
+		Tool{
+			"get_todo_list",
+			"Read a to-do list message: tasks with ids, who completed each and when",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_id"}}}
+		},
+		Tool{
+			"toggle_todo_tasks",
+			"Mark tasks of a to-do list done or not done",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID."}}},
+				{"completed_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Task ids to mark done."}}},
+				{"incompleted_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Task ids to mark not done."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_id"}}}
+		},
+		Tool{
+			"append_todo_tasks",
+			"Add tasks to an existing to-do list",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Chat ID."}}},
+				{"message_id", QJsonObject{{"type", "integer"}, {"description", "Message ID."}}},
+				{"tasks", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Task texts, in order."}}}
+			}}, {"required", QJsonArray{"chat_id", "message_id", "tasks"}}}
+		},
+
 		// Budget & Reporting - 5 tools
 		Tool{
 			"set_wallet_budget",

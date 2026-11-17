@@ -1674,6 +1674,14 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["get_group_call_participants"] = [this](const QJsonObject &args) { return toolGetGroupCallParticipants(args); };
 	_toolHandlers["export_group_call_invite"] = [this](const QJsonObject &args) { return toolExportGroupCallInvite(args); };
 	_toolHandlers["get_group_call_rtmp_url"] = [this](const QJsonObject &args) { return toolGetGroupCallRtmpUrl(args); };
+	_toolHandlers["report_peer"] = [this](const QJsonObject &args) { return toolReportPeer(args); };
+	_toolHandlers["report_messages"] = [this](const QJsonObject &args) { return toolReportMessages(args); };
+	_toolHandlers["fave_sticker"] = [this](const QJsonObject &args) { return toolFaveSticker(args); };
+	_toolHandlers["save_gif"] = [this](const QJsonObject &args) { return toolSaveGif(args); };
+	_toolHandlers["send_todo_list"] = [this](const QJsonObject &args) { return toolSendTodoList(args); };
+	_toolHandlers["get_todo_list"] = [this](const QJsonObject &args) { return toolGetTodoList(args); };
+	_toolHandlers["toggle_todo_tasks"] = [this](const QJsonObject &args) { return toolToggleTodoTasks(args); };
+	_toolHandlers["append_todo_tasks"] = [this](const QJsonObject &args) { return toolAppendTodoTasks(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };
