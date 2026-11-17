@@ -1648,6 +1648,8 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["set_account_self_destruct"] = [this](const QJsonObject &args) { return toolSetAccountSelfDestruct(args); };
 	_toolHandlers["terminate_all_other_sessions"] = [this](const QJsonObject &args) { return toolTerminateAllOtherSessions(args); };
 	_toolHandlers["get_global_privacy"] = [this](const QJsonObject &args) { return toolGetGlobalPrivacy(args); };
+	_toolHandlers["set_global_privacy"] = [this](const QJsonObject &args) { return toolSetGlobalPrivacy(args); };
+	_toolHandlers["set_privacy"] = [this](const QJsonObject &args) { return toolSetPrivacy(args); };
 	_toolHandlers["process_join_request"] = [this](const QJsonObject &args) { return toolProcessJoinRequest(args); };
 	_toolHandlers["delete_invite_link"] = [this](const QJsonObject &args) { return toolDeleteInviteLink(args); };
 	_toolHandlers["get_recommended_channels"] = [this](const QJsonObject &args) { return toolGetRecommendedChannels(args); };

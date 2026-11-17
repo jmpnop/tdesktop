@@ -6,6 +6,7 @@
 
 #include "mcp_server_includes.h"
 
+#include "api/api_global_privacy.h"
 #include "wallet/wallet_session.h"
 
 namespace MCP {
@@ -33,6 +34,110 @@ Api::UserPrivacy::Option stringToPrivacyOption(const QString &str) {
 	if (str == "close_friends") return Option::CloseFriends;
 	if (str == "nobody") return Option::Nobody;
 	return Option::Nobody; // Default to most restrictive
+}
+
+// The MCP names of the privacy keys; the TL constructors are what account.getPrivacy takes.
+const std::vector<std::pair<QString, MTPInputPrivacyKey>> &PrivacyKeys() {
+	static const auto result = std::vector<std::pair<QString, MTPInputPrivacyKey>>{
+		{ "last_seen", MTP_inputPrivacyKeyStatusTimestamp() },
+		{ "profile_photo", MTP_inputPrivacyKeyProfilePhoto() },
+		{ "phone_number", MTP_inputPrivacyKeyPhoneNumber() },
+		{ "added_by_phone", MTP_inputPrivacyKeyAddedByPhone() },
+		{ "forwards", MTP_inputPrivacyKeyForwards() },
+		{ "calls", MTP_inputPrivacyKeyPhoneCall() },
+		{ "calls_p2p", MTP_inputPrivacyKeyPhoneP2P() },
+		{ "invites", MTP_inputPrivacyKeyChatInvite() },
+		{ "voice_messages", MTP_inputPrivacyKeyVoiceMessages() },
+		{ "about", MTP_inputPrivacyKeyAbout() },
+		{ "birthday", MTP_inputPrivacyKeyBirthday() },
+		{ "gifts_auto_save", MTP_inputPrivacyKeyStarGiftsAutoSave() },
+		{ "no_paid_messages", MTP_inputPrivacyKeyNoPaidMessages() },
+		{ "saved_music", MTP_inputPrivacyKeySavedMusic() },
+	};
+	return result;
+}
+
+QStringList PrivacyKeyNames() {
+	auto result = QStringList();
+	for (const auto &[name, key] : PrivacyKeys()) {
+		result.push_back(name);
+	}
+	return result;
+}
+
+std::optional<MTPInputPrivacyKey> PrivacyKeyToTL(const QString &name) {
+	for (const auto &[known, key] : PrivacyKeys()) {
+		if (known == name) {
+			return key;
+		}
+	}
+	return std::nullopt;
+}
+
+// Reports every rule Telegram returned, so exceptions are visible next to the base option.
+QJsonObject DescribePrivacyRules(
+		not_null<Main::Session*> session,
+		const MTPVector<MTPPrivacyRule> &rules) {
+	auto result = QJsonObject();
+	auto rule = QString();
+	auto allowUsers = QJsonArray();
+	auto disallowUsers = QJsonArray();
+	auto allowChats = QJsonArray();
+	auto disallowChats = QJsonArray();
+	const auto chatId = [&](const MTPlong &bare) {
+		const auto channel = peerFromChannel(bare.v);
+		return qint64((session->data().peerLoaded(channel)
+			? channel
+			: peerFromChat(bare.v)).value);
+	};
+	// Rules apply in order, so the first base option is the one in force.
+	const auto setRule = [&](const QString &value) {
+		if (rule.isEmpty()) {
+			rule = value;
+		}
+	};
+	for (const auto &entry : rules.v) {
+		entry.match([&](const MTPDprivacyValueAllowAll &) {
+			setRule(u"everybody"_q);
+		}, [&](const MTPDprivacyValueAllowContacts &) {
+			setRule(u"contacts"_q);
+		}, [&](const MTPDprivacyValueAllowCloseFriends &) {
+			setRule(u"close_friends"_q);
+		}, [&](const MTPDprivacyValueDisallowAll &) {
+			setRule(u"nobody"_q);
+		}, [&](const MTPDprivacyValueDisallowContacts &) {
+			result["disallow_contacts"] = true;
+		}, [&](const MTPDprivacyValueAllowUsers &data) {
+			for (const auto &id : data.vusers().v) {
+				allowUsers.append(qint64(id.v));
+			}
+		}, [&](const MTPDprivacyValueDisallowUsers &data) {
+			for (const auto &id : data.vusers().v) {
+				disallowUsers.append(qint64(id.v));
+			}
+		}, [&](const MTPDprivacyValueAllowChatParticipants &data) {
+			for (const auto &id : data.vchats().v) {
+				allowChats.append(chatId(id));
+			}
+		}, [&](const MTPDprivacyValueDisallowChatParticipants &data) {
+			for (const auto &id : data.vchats().v) {
+				disallowChats.append(chatId(id));
+			}
+		}, [&](const MTPDprivacyValueAllowPremium &) {
+			result["allow_premium"] = true;
+		}, [&](const MTPDprivacyValueAllowBots &) {
+			result["allow_bots"] = true;
+		}, [&](const MTPDprivacyValueDisallowBots &) {
+			result["disallow_bots"] = true;
+		});
+	}
+	// A rule list that names no base option denies everyone it does not list.
+	result["rule"] = rule.isEmpty() ? u"nobody"_q : rule;
+	result["allow_user_ids"] = allowUsers;
+	result["disallow_user_ids"] = disallowUsers;
+	result["allow_chat_ids"] = allowChats;
+	result["disallow_chat_ids"] = disallowChats;
+	return result;
 }
 
 } // namespace
@@ -241,59 +346,152 @@ QJsonObject Server::toolUpdateProfilePhone(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolGetPrivacySettings(const QJsonObject &args) {
-	Q_UNUSED(args);
-
 	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
+		return toolError("No active session");
 	}
+	auto names = QStringList();
+	if (args.contains("key")) {
+		const auto key = args["key"].toString();
+		if (!PrivacyKeyToTL(key)) {
+			return toolError("Unknown privacy key '" + key + "'; one of: "
+				+ PrivacyKeyNames().join(", "));
+		}
+		names.push_back(key);
+	} else {
+		names = PrivacyKeyNames();
+	}
+	const auto session = _session;
+	const auto settings = std::make_shared<QJsonObject>();
+	const auto left = std::make_shared<int>(names.size());
+	return awaitMtp([&](auto done, auto fail) {
+		for (const auto &name : names) {
+			const auto key = *PrivacyKeyToTL(name);
+			session->api().request(MTPaccount_GetPrivacy(
+				key
+			)).done([=](const MTPaccount_PrivacyRules &result) {
+				const auto &data = result.data();
+				session->data().processUsers(data.vusers());
+				session->data().processChats(data.vchats());
+				session->api().userPrivacy().apply(
+					key.type(),
+					data.vrules(),
+					true);
+				(*settings)[name] = DescribePrivacyRules(
+					session,
+					data.vrules());
+				if (!--*left) {
+					auto value = QJsonObject();
+					value["success"] = true;
+					value["settings"] = *settings;
+					done(value);
+				}
+			}).fail([=](const MTP::Error &error) {
+				fail(name + ": " + error.type());
+			}).send();
+		}
+	});
+}
 
-	// Request reload of all privacy settings
-	auto &privacy = _session->api().userPrivacy();
-
-	// Reload all relevant privacy keys
-	privacy.reload(Api::UserPrivacy::Key::LastSeen);
-	privacy.reload(Api::UserPrivacy::Key::ProfilePhoto);
-	privacy.reload(Api::UserPrivacy::Key::PhoneNumber);
-	privacy.reload(Api::UserPrivacy::Key::Forwards);
-	privacy.reload(Api::UserPrivacy::Key::Birthday);
-	privacy.reload(Api::UserPrivacy::Key::About);
-	privacy.reload(Api::UserPrivacy::Key::Calls);
-	privacy.reload(Api::UserPrivacy::Key::Invites);
-
-	// Read current cached privacy values where available
-	QJsonObject settings;
-	auto &privacyApi = _session->api().userPrivacy();
-
-	// Helper to read a privacy key's current cached value
-	auto readKey = [&](Api::UserPrivacy::Key key, const QString &name) {
-		// Trigger reload to ensure fresh data
-		privacyApi.reload(key);
+QJsonObject Server::toolSetPrivacy(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto name = args["key"].toString();
+	const auto key = PrivacyKeyToTL(name);
+	if (!key) {
+		return toolError("Unknown privacy key '" + name + "'; one of: "
+			+ PrivacyKeyNames().join(", "));
+	}
+	const auto rule = args["rule"].toString();
+	auto rules = QVector<MTPInputPrivacyRule>();
+	const auto users = [&](const QString &field, QString *error) {
+		auto result = QVector<MTPInputUser>();
+		for (const auto &id : args[field].toArray()) {
+			const auto peer = resolvePeer(id.toVariant().toLongLong());
+			const auto user = peer ? peer->asUser() : nullptr;
+			if (!user) {
+				*error = QString("%1: no user %2 in this client's data"
+					).arg(field).arg(id.toVariant().toLongLong());
+				return result;
+			}
+			result.push_back(user->inputUser());
+		}
+		return result;
 	};
-
-	// Trigger reloads for all keys
-	readKey(Api::UserPrivacy::Key::LastSeen, "last_seen");
-	readKey(Api::UserPrivacy::Key::ProfilePhoto, "profile_photo");
-	readKey(Api::UserPrivacy::Key::PhoneNumber, "phone_number");
-	readKey(Api::UserPrivacy::Key::Forwards, "forwards");
-	readKey(Api::UserPrivacy::Key::Birthday, "birthday");
-	readKey(Api::UserPrivacy::Key::About, "about");
-	readKey(Api::UserPrivacy::Key::Calls, "calls");
-	readKey(Api::UserPrivacy::Key::Invites, "invites");
-
-	return QJsonObject{
-		{"status", "success"},
-		{"note", "Privacy settings reload initiated. Use individual update_*_privacy tools "
-			"to modify settings. Values are loaded asynchronously by Telegram."},
-		{"available_keys", QJsonArray{
-			"last_seen", "profile_photo", "phone_number", "forwards",
-			"birthday", "about", "calls", "invites"
-		}},
-		{"usage", "Use update_last_seen_privacy, update_profile_photo_privacy, etc. "
-			"with rule: everybody/contacts/close_friends/nobody"},
+	const auto chats = [&](const QString &field, QString *error) {
+		auto result = QVector<MTPlong>();
+		for (const auto &id : args[field].toArray()) {
+			const auto peer = resolvePeer(id.toVariant().toLongLong());
+			if (!peer || peer->isUser()) {
+				*error = QString("%1: no group %2 in this client's data"
+					).arg(field).arg(id.toVariant().toLongLong());
+				return result;
+			}
+			result.push_back(peerToBareMTPInt(peer->id));
+		}
+		return result;
 	};
+	auto error = QString();
+	// Exceptions first, the base option last, the order the official client sends.
+	if (const auto list = users("allow_user_ids", &error); !list.isEmpty()) {
+		rules.push_back(MTP_inputPrivacyValueAllowUsers(MTP_vector(list)));
+	}
+	if (const auto list = chats("allow_chat_ids", &error); !list.isEmpty()) {
+		rules.push_back(MTP_inputPrivacyValueAllowChatParticipants(
+			MTP_vector(list)));
+	}
+	if (args["allow_premium"].toBool()) {
+		rules.push_back(MTP_inputPrivacyValueAllowPremium());
+	}
+	if (args["allow_bots"].toBool()) {
+		rules.push_back(MTP_inputPrivacyValueAllowBots());
+	}
+	if (const auto list = users("disallow_user_ids", &error); !list.isEmpty()) {
+		rules.push_back(MTP_inputPrivacyValueDisallowUsers(MTP_vector(list)));
+	}
+	if (const auto list = chats("disallow_chat_ids", &error); !list.isEmpty()) {
+		rules.push_back(MTP_inputPrivacyValueDisallowChatParticipants(
+			MTP_vector(list)));
+	}
+	if (args["disallow_bots"].toBool()) {
+		rules.push_back(MTP_inputPrivacyValueDisallowBots());
+	}
+	if (!error.isEmpty()) {
+		return toolError(error);
+	}
+	if (rule == "everybody" || rule == "everyone") {
+		rules.push_back(MTP_inputPrivacyValueAllowAll());
+	} else if (rule == "contacts") {
+		rules.push_back(MTP_inputPrivacyValueAllowContacts());
+	} else if (rule == "close_friends") {
+		rules.push_back(MTP_inputPrivacyValueAllowCloseFriends());
+	} else if (rule == "nobody") {
+		rules.push_back(MTP_inputPrivacyValueDisallowAll());
+	} else {
+		return toolError("rule must be everybody, contacts, close_friends "
+			"or nobody");
+	}
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPaccount_SetPrivacy(
+			*key,
+			MTP_vector(rules)
+		)).done([=](const MTPaccount_PrivacyRules &result) {
+			const auto &data = result.data();
+			session->data().processUsers(data.vusers());
+			session->data().processChats(data.vchats());
+			session->api().userPrivacy().apply(
+				key->type(),
+				data.vrules(),
+				true);
+			auto value = DescribePrivacyRules(session, data.vrules());
+			value["success"] = true;
+			value["key"] = name;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolUpdateLastSeenPrivacy(const QJsonObject &args) {
@@ -3189,9 +3387,87 @@ QJsonObject Server::toolGetGlobalPrivacy(const QJsonObject &args) {
 			value["hide_read_marks"] = d.is_hide_read_marks();
 			value["new_noncontact_peers_require_premium"]
 				= d.is_new_noncontact_peers_require_premium();
+			value["display_gifts_button"] = d.is_display_gifts_button();
+			value["noncontact_peers_paid_stars"] = qint64(
+				d.vnoncontact_peers_paid_stars().value_or_empty());
 			done(value);
 		}).fail([=](const MTP::Error &error) {
 			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSetGlobalPrivacy(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	using Flag = MTPDglobalPrivacySettings::Flag;
+	const auto toggles = std::vector<std::pair<QString, Flag>>{
+		{ "archive_and_mute_new_noncontact_peers",
+			Flag::f_archive_and_mute_new_noncontact_peers },
+		{ "keep_archived_unmuted", Flag::f_keep_archived_unmuted },
+		{ "keep_archived_folders", Flag::f_keep_archived_folders },
+		{ "hide_read_marks", Flag::f_hide_read_marks },
+		{ "new_noncontact_peers_require_premium",
+			Flag::f_new_noncontact_peers_require_premium },
+		{ "display_gifts_button", Flag::f_display_gifts_button },
+	};
+	const auto hasStars = args.contains("noncontact_peers_paid_stars");
+	auto named = false;
+	for (const auto &[field, flag] : toggles) {
+		named |= args.contains(field);
+	}
+	if (!named && !hasStars) {
+		return toolError("Nothing to change: pass at least one setting "
+			"reported by get_global_privacy");
+	}
+	const auto stars = args["noncontact_peers_paid_stars"].toVariant().toLongLong();
+	const auto session = _session;
+	// The method replaces the whole object, so unnamed settings are read first and sent back unchanged.
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPaccount_GetGlobalPrivacySettings(
+		)).done([=](const MTPGlobalPrivacySettings &current) {
+			const auto &d = current.data();
+			auto flags = d.vflags().v;
+			for (const auto &[field, flag] : toggles) {
+				if (args.contains(field)) {
+					flags = args[field].toBool() ? (flags | flag) : (flags & ~flag);
+				}
+			}
+			auto paid = d.vnoncontact_peers_paid_stars().value_or_empty();
+			if (hasStars) {
+				paid = stars;
+			}
+			flags = paid ? (flags | Flag::f_noncontact_peers_paid_stars)
+				: (flags & ~Flag::f_noncontact_peers_paid_stars);
+			session->api().request(MTPaccount_SetGlobalPrivacySettings(
+				MTP_globalPrivacySettings(
+					MTP_flags(flags),
+					MTP_long(paid),
+					d.vdisallowed_gifts()
+						? *d.vdisallowed_gifts()
+						: MTPDisallowedGiftsSettings())
+			)).done([=](const MTPGlobalPrivacySettings &result) {
+				session->api().globalPrivacy().reload();
+				const auto &r = result.data();
+				auto value = QJsonObject();
+				value["success"] = true;
+				value["archive_and_mute_new_noncontact_peers"]
+					= r.is_archive_and_mute_new_noncontact_peers();
+				value["keep_archived_unmuted"] = r.is_keep_archived_unmuted();
+				value["keep_archived_folders"] = r.is_keep_archived_folders();
+				value["hide_read_marks"] = r.is_hide_read_marks();
+				value["new_noncontact_peers_require_premium"]
+					= r.is_new_noncontact_peers_require_premium();
+				value["display_gifts_button"] = r.is_display_gifts_button();
+				value["noncontact_peers_paid_stars"] = qint64(
+					r.vnoncontact_peers_paid_stars().value_or_empty());
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail(error.type());
+			}).send();
+		}).fail([=](const MTP::Error &error) {
+			fail("account.getGlobalPrivacySettings: " + error.type());
 		}).send();
 	});
 }

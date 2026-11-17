@@ -3349,6 +3349,34 @@ void Server::registerTools() {
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
+			"set_global_privacy",
+			"Change account-wide privacy settings; only the named settings change",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"archive_and_mute_new_noncontact_peers", QJsonObject{{"type", "boolean"}, {"description", "Archive and mute new chats from non-contacts."}}},
+				{"keep_archived_unmuted", QJsonObject{{"type", "boolean"}, {"description", "Keep unmuted archived chats in the archive when a message arrives."}}},
+				{"keep_archived_folders", QJsonObject{{"type", "boolean"}, {"description", "Keep archived chats from folders in the archive when a message arrives."}}},
+				{"hide_read_marks", QJsonObject{{"type", "boolean"}, {"description", "Hide read times (and stop seeing others')."}}},
+				{"new_noncontact_peers_require_premium", QJsonObject{{"type", "boolean"}, {"description", "Only Premium non-contacts may message you."}}},
+				{"display_gifts_button", QJsonObject{{"type", "boolean"}, {"description", "Show the gift button in the message field of your chats."}}},
+				{"noncontact_peers_paid_stars", QJsonObject{{"type", "integer"}, {"description", "Stars non-contacts pay per message; 0 turns it off."}}}
+			}}}
+		},
+		Tool{
+			"set_privacy",
+			"Set one privacy rule: a base option plus allow/deny exceptions for users, group members, Premium users and bots",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"key", QJsonObject{{"type", "string"}, {"description", "One of: last_seen, profile_photo, phone_number, added_by_phone, forwards, calls, calls_p2p, invites, voice_messages, about, birthday, gifts_auto_save, no_paid_messages, saved_music."}}},
+				{"rule", QJsonObject{{"type", "string"}, {"description", "everybody, contacts, close_friends or nobody."}}},
+				{"allow_user_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Users always allowed."}}},
+				{"disallow_user_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Users never allowed."}}},
+				{"allow_chat_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Groups whose members are always allowed."}}},
+				{"disallow_chat_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Groups whose members are never allowed."}}},
+				{"allow_premium", QJsonObject{{"type", "boolean"}, {"description", "Always allow Premium users."}}},
+				{"allow_bots", QJsonObject{{"type", "boolean"}, {"description", "Always allow mini apps and bots."}}},
+				{"disallow_bots", QJsonObject{{"type", "boolean"}, {"description", "Never allow mini apps and bots."}}}
+			}}, {"required", QJsonArray{"key", "rule"}}}
+		},
+		Tool{
 			"process_join_request",
 			"Approve or decline a user's pending request to join a channel or group",
 			QJsonObject{
@@ -4410,8 +4438,10 @@ void Server::registerTools() {
 		// ===== PRIVACY SETTINGS TOOLS =====
 		Tool{
 			"get_privacy_settings",
-			"Get all privacy settings (last seen, profile photo, phone, forwards, birthday, about)",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			"Read privacy rules from Telegram: the base option plus allow/deny exceptions, for one key or all of them",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"key", QJsonObject{{"type", "string"}, {"description", "Optional; omit for all. One of: last_seen, profile_photo, phone_number, added_by_phone, forwards, calls, calls_p2p, invites, voice_messages, about, birthday, gifts_auto_save, no_paid_messages, saved_music."}}}
+			}}}
 		},
 		Tool{
 			"update_last_seen_privacy",

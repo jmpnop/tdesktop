@@ -361,6 +361,8 @@ private:
 	QJsonObject toolSetAccountSelfDestruct(const QJsonObject &args);
 	QJsonObject toolTerminateAllOtherSessions(const QJsonObject &args);
 	QJsonObject toolGetGlobalPrivacy(const QJsonObject &args);
+	QJsonObject toolSetGlobalPrivacy(const QJsonObject &args);
+	QJsonObject toolSetPrivacy(const QJsonObject &args);
 	QJsonObject toolProcessJoinRequest(const QJsonObject &args);
 	QJsonObject toolDeleteInviteLink(const QJsonObject &args);
 	QJsonObject toolGetRecommendedChannels(const QJsonObject &args);
