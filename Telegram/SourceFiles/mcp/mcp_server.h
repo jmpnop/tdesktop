@@ -826,6 +826,8 @@ private:
 	// client has not loaded. Callers should report that as "chat not found"
 	// rather than distinguishing the cases, which are not distinguishable to
 	// the caller anyway.
+	// Stars transactions with bots (all bots when `bot` is empty), read up to maxPages pages.
+	[[nodiscard]] QJsonObject scanMiniappTransactions(UserId bot, int maxPages);
 	// Changes a privacy key's base option and keeps its exceptions.
 	[[nodiscard]] QJsonObject updatePrivacyOption(
 		const QString &name,

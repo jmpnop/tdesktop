@@ -4082,34 +4082,27 @@ void Server::registerTools() {
 		// Mini Apps - 3 tools
 		Tool{
 			"get_miniapp_spending",
-			"Get spending in mini apps",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"miniapp_id", QJsonObject{{"type", "string"}, {"description", "Restrict results to one mini app; omit for all of them."}}},
-				}}
-			}
+			"Stars you spent in mini apps (bots), totalled per app from your real Stars history",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"miniapp_id", QJsonObject{{"type", "integer"}, {"description", "Bot user id; omit for all mini apps."}}},
+				{"max_pages", QJsonObject{{"type", "integer"}, {"description", "Pages of 100 Stars transactions to scan (default 5, max 20)."}}}
+			}}}
 		},
 		Tool{
 			"get_miniapp_history",
-			"Get mini app transaction history",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-				}}
-			}
+			"Your Stars transactions with mini apps (bots): payments, refunds, subscriptions",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"miniapp_id", QJsonObject{{"type", "integer"}, {"description", "Bot user id; omit for all mini apps."}}},
+				{"max_pages", QJsonObject{{"type", "integer"}, {"description", "Pages of 100 Stars transactions to scan (default 5, max 20)."}}}
+			}}}
 		},
 		Tool{
 			"set_miniapp_budget",
-			"Approve a mini app spend (does not set a standing budget -- use set_spending_budget for that)",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"miniapp_id", QJsonObject{{"type", "string"}, {"description", "App ID"}}},
-					{"amount", QJsonObject{{"type", "number"}, {"description", "Amount in Telegram Stars."}}},
-				}},
-				{"required", QJsonArray{"miniapp_id"}}
-			}
+			"Set a local Stars cap for one mini app; approve_miniapp_spend refuses payments over it (Telegram itself has no per-app budget)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"miniapp_id", QJsonObject{{"type", "integer"}, {"description", "Bot user id."}}},
+				{"amount", QJsonObject{{"type", "number"}, {"description", "Cap in Stars; 0 removes it."}}}
+			}}, {"required", QJsonArray{"miniapp_id", "amount"}}}
 		},
 
 		// Star Rating - 3 tools
@@ -5029,14 +5022,28 @@ void Server::registerTools() {
 		Tool{"get_creator_dashboard", "Get creator dashboard overview", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 
 		// --- Mini Apps ---
-		Tool{"list_miniapp_permissions", "List mini app permissions", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
-		Tool{"approve_miniapp_spend", "Approve mini app spending", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"miniapp_id", QJsonObject{{"type", "string"}, {"description", "Mini app ID"}}},
-			{"amount", QJsonObject{{"type", "number"}, {"description", "Amount to approve"}}}
-		}}, {"required", QJsonArray{"miniapp_id", "amount"}}}},
-		Tool{"revoke_miniapp_permission", "Revoke mini app permission", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"miniapp_id", QJsonObject{{"type", "string"}, {"description", "Mini app ID"}}}
-		}}, {"required", QJsonArray{"miniapp_id"}}}},
+		Tool{
+			"list_miniapp_permissions",
+			"Mini apps installed in your attachment and side menus, with write-access, emoji-status permission and any local budget",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"approve_miniapp_spend",
+			"Pay a mini app's Stars invoice. Without confirm it only shows the amount; with confirm it pays real Stars, within any local budget",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"miniapp_id", QJsonObject{{"type", "integer"}, {"description", "Bot user id that issued the invoice."}}},
+				{"invoice", QJsonObject{{"type", "string"}, {"description", "Invoice slug or the t.me/$slug link the mini app opened."}}},
+				{"confirm", QJsonObject{{"type", "boolean"}, {"description", "true to actually pay; default only previews."}}}
+			}}, {"required", QJsonArray{"miniapp_id", "invoice"}}}
+		},
+		Tool{
+			"revoke_miniapp_permission",
+			"Remove a mini app from your menus, or take back its permission to change your emoji status",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"miniapp_id", QJsonObject{{"type", "integer"}, {"description", "Bot user id."}}},
+				{"permission", QJsonObject{{"type", "string"}, {"description", "attach_menu (default) or emoji_status."}}}
+			}}, {"required", QJsonArray{"miniapp_id"}}}
+		},
 
 		// --- Semantic Search ---
 		Tool{"semantic_index_messages", "Index messages for semantic search (alias for index_messages)", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
