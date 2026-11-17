@@ -4634,7 +4634,7 @@ void Server::registerTools() {
 		// ===== SECURITY SETTINGS TOOLS =====
 		Tool{
 			"get_security_settings",
-			"Get security settings including auto-delete period",
+			"Security overview from Telegram: two-step verification state, recovery and login email set, account self-destruct, default auto-delete timer, active sessions",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{

@@ -619,25 +619,59 @@ QJsonObject Server::toolGetBlockedUsers(const QJsonObject &args) {
 
 QJsonObject Server::toolGetSecuritySettings(const QJsonObject &args) {
 	Q_UNUSED(args);
-
 	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
+		return toolError("No active session");
 	}
-
-	// Reload self-destruct settings to get auto-delete period
-	_session->api().selfDestruct().reload();
-
-	// Get current auto-delete period
-	const auto ttl = _session->api().selfDestruct().periodDefaultHistoryTTLCurrent();
-
-	return QJsonObject{
-		{"auto_delete_period_seconds", ttl},
-		{"status", "success"},
-		{"note", "Security settings retrieved. 2FA status requires async API call."},
-	};
+	const auto session = _session;
+	const auto value = std::make_shared<QJsonObject>();
+	const auto left = std::make_shared<int>(4);
+	// Four independent reads; the answer goes out once all of them are back.
+	return awaitMtp([&](auto done, auto fail) {
+		const auto finish = [=] {
+			if (!--*left) {
+				(*value)["success"] = true;
+				done(*value);
+			}
+		};
+		session->api().request(MTPaccount_GetPassword(
+		)).done([=](const MTPaccount_Password &result) {
+			const auto &data = result.data();
+			(*value)["two_step_enabled"] = data.is_has_password();
+			(*value)["two_step_has_recovery_email"] = data.is_has_recovery();
+			(*value)["two_step_has_hint"] = bool(data.vhint());
+			(*value)["login_email_set"] = bool(data.vlogin_email_pattern());
+			if (const auto reset = data.vpending_reset_date()) {
+				(*value)["two_step_pending_reset_date"] = qint64(reset->v);
+			}
+			finish();
+		}).fail([=](const MTP::Error &error) {
+			fail("account.getPassword: " + error.type());
+		}).send();
+		session->api().request(MTPaccount_GetAccountTTL(
+		)).done([=](const MTPAccountDaysTTL &result) {
+			(*value)["account_self_destruct_days"] = result.data().vdays().v;
+			finish();
+		}).fail([=](const MTP::Error &error) {
+			fail("account.getAccountTTL: " + error.type());
+		}).send();
+		session->api().request(MTPmessages_GetDefaultHistoryTTL(
+		)).done([=](const MTPDefaultHistoryTTL &result) {
+			(*value)["default_message_ttl_seconds"] = result.data().vperiod().v;
+			finish();
+		}).fail([=](const MTP::Error &error) {
+			fail("messages.getDefaultHistoryTTL: " + error.type());
+		}).send();
+		session->api().request(MTPaccount_GetAuthorizations(
+		)).done([=](const MTPaccount_Authorizations &result) {
+			const auto &data = result.data();
+			(*value)["active_sessions"] = int(data.vauthorizations().v.size());
+			(*value)["inactive_session_ttl_days"]
+				= data.vauthorization_ttl_days().v;
+			finish();
+		}).fail([=](const MTP::Error &error) {
+			fail("account.getAuthorizations: " + error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetActiveSessions(const QJsonObject &args) {
