@@ -1666,6 +1666,9 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["delete_forum_topic"] = [this](const QJsonObject &args) { return toolDeleteForumTopic(args); };
 	_toolHandlers["set_chat_photo"] = [this](const QJsonObject &args) { return toolSetChatPhoto(args); };
 	_toolHandlers["get_boosts_status"] = [this](const QJsonObject &args) { return toolGetBoostsStatus(args); };
+	_toolHandlers["list_usernames"] = [this](const QJsonObject &args) { return toolListUsernames(args); };
+	_toolHandlers["toggle_username"] = [this](const QJsonObject &args) { return toolToggleUsername(args); };
+	_toolHandlers["reorder_usernames"] = [this](const QJsonObject &args) { return toolReorderUsernames(args); };
 	_toolHandlers["terminate_session"] = [this](const QJsonObject &args) { return toolTerminateSession(args); };
 	_toolHandlers["block_user"] = [this](const QJsonObject &args) { return toolBlockUser(args); };
 	_toolHandlers["unblock_user"] = [this](const QJsonObject &args) { return toolUnblockUser(args); };

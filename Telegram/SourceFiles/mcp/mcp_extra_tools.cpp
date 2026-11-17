@@ -15,6 +15,8 @@
 #include "api/api_text_entities.h"
 #include "api/api_invite_links.h"
 #include "api/api_peer_photo.h"
+#include "api/api_user_names.h"
+#include "data/data_user_names.h"
 
 #include <QtCore/QEventLoop>
 
@@ -1623,6 +1625,219 @@ QJsonObject Server::toolGetBoostsStatus(const QJsonObject &args) {
 		}).fail([=](const MTP::Error &error) {
 			fail(error.type());
 		}).send();
+	});
+}
+
+// Wave 9 - usernames, including collectible (Fragment) ones.
+namespace {
+
+// No chat_id means your own account; otherwise a channel, group or bot you manage.
+[[nodiscard]] PeerData *UsernameOwner(
+		not_null<Main::Session*> session,
+		PeerData *peer,
+		bool hasChatId) {
+	return hasChatId ? peer : session->user().get();
+}
+
+} // namespace
+
+QJsonObject Server::toolListUsernames(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto hasChatId = args.contains("chat_id");
+	const auto peer = UsernameOwner(
+		_session,
+		resolvePeer(args["chat_id"].toVariant().toLongLong()),
+		hasChatId);
+	if (!peer) {
+		return toolError("No such chat in this client's data");
+	}
+	const auto session = _session;
+	const auto report = [=](
+			const tl::conditional<MTPVector<MTPUsername>> &list,
+			const tl::conditional<MTPstring> &single) {
+		auto items = QJsonArray();
+		if (list) {
+			for (const auto &entry : Api::Usernames::FromTL(*list)) {
+				auto item = QJsonObject();
+				item["username"] = entry.username;
+				item["active"] = entry.active;
+				item["editable"] = entry.editable;
+				// Only the one base username is editable; the rest are collectible ones bought on Fragment.
+				item["collectible"] = !entry.editable;
+				items.append(item);
+			}
+		} else if (single) {
+			auto item = QJsonObject();
+			item["username"] = qs(*single);
+			item["active"] = true;
+			item["editable"] = true;
+			item["collectible"] = false;
+			items.append(item);
+		}
+		auto value = QJsonObject();
+		value["success"] = true;
+		value["chat_id"] = qint64(peer->id.value);
+		value["usernames"] = items;
+		value["count"] = items.size();
+		return value;
+	};
+	return awaitMtp([&](auto done, auto fail) {
+		if (const auto channel = peer->asChannel()) {
+			session->api().request(MTPchannels_GetChannels(
+				MTP_vector<MTPInputChannel>(1, channel->inputChannel())
+			)).done([=](const MTPmessages_Chats &result) {
+				session->data().processChats(result.match([](
+						const auto &data) {
+					return data.vchats();
+				}));
+				auto value = toolError("Telegram returned no channel");
+				result.match([&](const auto &data) {
+					for (const auto &chat : data.vchats().v) {
+						chat.match([&](const MTPDchannel &c) {
+							value = report(c.vusernames(), c.vusername());
+						}, [](const auto &) {
+						});
+					}
+				});
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail(error.type());
+			}).send();
+		} else if (const auto user = peer->asUser()) {
+			session->api().request(MTPusers_GetUsers(
+				MTP_vector<MTPInputUser>(1, user->isSelf()
+					? MTP_inputUserSelf()
+					: user->inputUser())
+			)).done([=](const MTPVector<MTPUser> &result) {
+				session->data().processUsers(result);
+				auto value = toolError("Telegram returned no user");
+				for (const auto &entry : result.v) {
+					entry.match([&](const MTPDuser &u) {
+						value = report(u.vusernames(), u.vusername());
+					}, [](const auto &) {
+					});
+				}
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail(error.type());
+			}).send();
+		} else {
+			fail("Basic groups have no usernames");
+		}
+	});
+}
+
+QJsonObject Server::toolToggleUsername(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto hasChatId = args.contains("chat_id");
+	const auto peer = UsernameOwner(
+		_session,
+		resolvePeer(args["chat_id"].toVariant().toLongLong()),
+		hasChatId);
+	if (!peer) {
+		return toolError("No such chat in this client's data");
+	}
+	const auto username = args["username"].toString().trimmed();
+	if (username.isEmpty()) {
+		return toolError("username is required");
+	}
+	const auto active = args.value("active").toBool(true);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		const auto finish = [=](const MTPBool &result) {
+			// Refresh the client's own copy so the profile shows the change.
+			session->api().usernames().requestToCache(peer);
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["chat_id"] = qint64(peer->id.value);
+			value["username"] = username;
+			value["active"] = active;
+			done(value);
+		};
+		const auto failed = [=](const MTP::Error &error) {
+			fail(error.type());
+		};
+		if (peer->isSelf()) {
+			session->api().request(MTPaccount_ToggleUsername(
+				MTP_string(username),
+				MTP_bool(active)
+			)).done(finish).fail(failed).send();
+		} else if (const auto channel = peer->asChannel()) {
+			session->api().request(MTPchannels_ToggleUsername(
+				channel->inputChannel(),
+				MTP_string(username),
+				MTP_bool(active)
+			)).done(finish).fail(failed).send();
+		} else if (const auto user = peer->asUser(); user && user->isBot()) {
+			session->api().request(MTPbots_ToggleUsername(
+				user->inputUser(),
+				MTP_string(username),
+				MTP_bool(active)
+			)).done(finish).fail(failed).send();
+		} else {
+			fail("Usernames can only be toggled for yourself, a channel, "
+				"a supergroup or a bot you own");
+		}
+	});
+}
+
+QJsonObject Server::toolReorderUsernames(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto hasChatId = args.contains("chat_id");
+	const auto peer = UsernameOwner(
+		_session,
+		resolvePeer(args["chat_id"].toVariant().toLongLong()),
+		hasChatId);
+	if (!peer) {
+		return toolError("No such chat in this client's data");
+	}
+	auto order = QVector<MTPstring>();
+	auto names = QJsonArray();
+	for (const auto &entry : args["order"].toArray()) {
+		order.push_back(MTP_string(entry.toString()));
+		names.append(entry.toString());
+	}
+	if (order.isEmpty()) {
+		return toolError("order is required: the active usernames in the "
+			"order to show them");
+	}
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		const auto finish = [=](const MTPBool &result) {
+			session->api().usernames().requestToCache(peer);
+			auto value = QJsonObject();
+			value["success"] = mtpIsTrue(result);
+			value["chat_id"] = qint64(peer->id.value);
+			value["order"] = names;
+			done(value);
+		};
+		const auto failed = [=](const MTP::Error &error) {
+			fail(error.type());
+		};
+		if (peer->isSelf()) {
+			session->api().request(MTPaccount_ReorderUsernames(
+				MTP_vector(order)
+			)).done(finish).fail(failed).send();
+		} else if (const auto channel = peer->asChannel()) {
+			session->api().request(MTPchannels_ReorderUsernames(
+				channel->inputChannel(),
+				MTP_vector(order)
+			)).done(finish).fail(failed).send();
+		} else if (const auto user = peer->asUser(); user && user->isBot()) {
+			session->api().request(MTPbots_ReorderUsernames(
+				user->inputUser(),
+				MTP_vector(order)
+			)).done(finish).fail(failed).send();
+		} else {
+			fail("Usernames can only be reordered for yourself, a channel, "
+				"a supergroup or a bot you own");
+		}
 	});
 }
 

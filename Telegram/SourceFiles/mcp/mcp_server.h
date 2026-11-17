@@ -379,6 +379,9 @@ private:
 	QJsonObject toolDeleteForumTopic(const QJsonObject &args);
 	QJsonObject toolSetChatPhoto(const QJsonObject &args);
 	QJsonObject toolGetBoostsStatus(const QJsonObject &args);
+	QJsonObject toolListUsernames(const QJsonObject &args);
+	QJsonObject toolToggleUsername(const QJsonObject &args);
+	QJsonObject toolReorderUsernames(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);
@@ -810,6 +813,10 @@ private:
 	// client has not loaded. Callers should report that as "chat not found"
 	// rather than distinguishing the cases, which are not distinguishable to
 	// the caller anyway.
+	// Changes a privacy key's base option and keeps its exceptions.
+	[[nodiscard]] QJsonObject updatePrivacyOption(
+		const QString &name,
+		const QString &rule);
 	[[nodiscard]] PeerData *resolvePeer(qint64 chatId) const;
 	[[nodiscard]] PeerData *resolvePeer(PeerId id) const;
 

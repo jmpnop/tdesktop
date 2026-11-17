@@ -3582,6 +3582,30 @@ void Server::registerTools() {
 				{"required", QJsonArray{"chat_id"}}
 			}
 		},
+		Tool{
+			"list_usernames",
+			"List all usernames of your account, a channel, supergroup or bot, including collectible (Fragment) ones and whether each is active",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Optional: a channel, supergroup or bot you own; omit for your own account."}}}
+			}}}
+		},
+		Tool{
+			"toggle_username",
+			"Show or hide one of the usernames (collectible ones included) on your account, a channel, supergroup or bot",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Optional: a channel, supergroup or bot you own; omit for your own account."}}},
+				{"username", QJsonObject{{"type", "string"}, {"description", "Username without the @."}}},
+				{"active", QJsonObject{{"type", "boolean"}, {"description", "true to show it (default), false to hide it."}}}
+			}}, {"required", QJsonArray{"username"}}}
+		},
+		Tool{
+			"reorder_usernames",
+			"Set the order in which the active usernames are shown",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Optional: a channel, supergroup or bot you own; omit for your own account."}}},
+				{"order", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Active usernames, without @, in display order."}}}
+			}}, {"required", QJsonArray{"order"}}}
+		},
 
 		// Budget & Reporting - 5 tools
 		Tool{

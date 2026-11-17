@@ -16,26 +16,6 @@ namespace MCP {
 
 namespace {
 
-QString privacyOptionToString(Api::UserPrivacy::Option option) {
-	using Option = Api::UserPrivacy::Option;
-	switch (option) {
-	case Option::Everyone: return "everybody";
-	case Option::Contacts: return "contacts";
-	case Option::CloseFriends: return "close_friends";
-	case Option::Nobody: return "nobody";
-	}
-	return "unknown";
-}
-
-Api::UserPrivacy::Option stringToPrivacyOption(const QString &str) {
-	using Option = Api::UserPrivacy::Option;
-	if (str == "everybody" || str == "everyone") return Option::Everyone;
-	if (str == "contacts") return Option::Contacts;
-	if (str == "close_friends") return Option::CloseFriends;
-	if (str == "nobody") return Option::Nobody;
-	return Option::Nobody; // Default to most restrictive
-}
-
 // The MCP names of the privacy keys; the TL constructors are what account.getPrivacy takes.
 const std::vector<std::pair<QString, MTPInputPrivacyKey>> &PrivacyKeys() {
 	static const auto result = std::vector<std::pair<QString, MTPInputPrivacyKey>>{
@@ -70,6 +50,19 @@ std::optional<MTPInputPrivacyKey> PrivacyKeyToTL(const QString &name) {
 		if (known == name) {
 			return key;
 		}
+	}
+	return std::nullopt;
+}
+
+std::optional<MTPInputPrivacyRule> PrivacyOptionToTL(const QString &rule) {
+	if (rule == "everybody" || rule == "everyone") {
+		return MTP_inputPrivacyValueAllowAll();
+	} else if (rule == "contacts") {
+		return MTP_inputPrivacyValueAllowContacts();
+	} else if (rule == "close_friends") {
+		return MTP_inputPrivacyValueAllowCloseFriends();
+	} else if (rule == "nobody") {
+		return MTP_inputPrivacyValueDisallowAll();
 	}
 	return std::nullopt;
 }
@@ -392,6 +385,80 @@ QJsonObject Server::toolGetPrivacySettings(const QJsonObject &args) {
 	});
 }
 
+QJsonObject Server::updatePrivacyOption(
+		const QString &name,
+		const QString &rule) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto key = PrivacyKeyToTL(name);
+	const auto base = PrivacyOptionToTL(rule);
+	if (!key || !base) {
+		return toolError("rule must be everybody, contacts, close_friends "
+			"or nobody");
+	}
+	const auto session = _session;
+	// Only the base option changes; the exceptions already set are read back and kept.
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPaccount_GetPrivacy(
+			*key
+		)).done([=](const MTPaccount_PrivacyRules &current) {
+			const auto &data = current.data();
+			session->data().processUsers(data.vusers());
+			session->data().processChats(data.vchats());
+			const auto inputUsers = [&](const MTPVector<MTPlong> &ids) {
+				auto result = QVector<MTPInputUser>();
+				for (const auto &id : ids.v) {
+					result.push_back(session->data().user(UserId(id.v))->inputUser());
+				}
+				return MTP_vector(result);
+			};
+			auto rules = QVector<MTPInputPrivacyRule>();
+			for (const auto &entry : data.vrules().v) {
+				entry.match([&](const MTPDprivacyValueAllowUsers &d) {
+					rules.push_back(MTP_inputPrivacyValueAllowUsers(inputUsers(d.vusers())));
+				}, [&](const MTPDprivacyValueDisallowUsers &d) {
+					rules.push_back(MTP_inputPrivacyValueDisallowUsers(inputUsers(d.vusers())));
+				}, [&](const MTPDprivacyValueAllowChatParticipants &d) {
+					rules.push_back(MTP_inputPrivacyValueAllowChatParticipants(d.vchats()));
+				}, [&](const MTPDprivacyValueDisallowChatParticipants &d) {
+					rules.push_back(MTP_inputPrivacyValueDisallowChatParticipants(d.vchats()));
+				}, [&](const MTPDprivacyValueDisallowContacts &) {
+					rules.push_back(MTP_inputPrivacyValueDisallowContacts());
+				}, [&](const MTPDprivacyValueAllowPremium &) {
+					rules.push_back(MTP_inputPrivacyValueAllowPremium());
+				}, [&](const MTPDprivacyValueAllowBots &) {
+					rules.push_back(MTP_inputPrivacyValueAllowBots());
+				}, [&](const MTPDprivacyValueDisallowBots &) {
+					rules.push_back(MTP_inputPrivacyValueDisallowBots());
+				}, [](const auto &) {
+				});
+			}
+			rules.push_back(*base);
+			session->api().request(MTPaccount_SetPrivacy(
+				*key,
+				MTP_vector(rules)
+			)).done([=](const MTPaccount_PrivacyRules &result) {
+				const auto &data = result.data();
+				session->data().processUsers(data.vusers());
+				session->data().processChats(data.vchats());
+				session->api().userPrivacy().apply(
+					key->type(),
+					data.vrules(),
+					true);
+				auto value = DescribePrivacyRules(session, data.vrules());
+				value["success"] = true;
+				value["key"] = name;
+				done(value);
+			}).fail([=](const MTP::Error &error) {
+				fail(error.type());
+			}).send();
+		}).fail([=](const MTP::Error &error) {
+			fail("account.getPrivacy: " + error.type());
+		}).send();
+	});
+}
+
 QJsonObject Server::toolSetPrivacy(const QJsonObject &args) {
 	if (!_session) {
 		return toolError("No active session");
@@ -459,14 +526,8 @@ QJsonObject Server::toolSetPrivacy(const QJsonObject &args) {
 	if (!error.isEmpty()) {
 		return toolError(error);
 	}
-	if (rule == "everybody" || rule == "everyone") {
-		rules.push_back(MTP_inputPrivacyValueAllowAll());
-	} else if (rule == "contacts") {
-		rules.push_back(MTP_inputPrivacyValueAllowContacts());
-	} else if (rule == "close_friends") {
-		rules.push_back(MTP_inputPrivacyValueAllowCloseFriends());
-	} else if (rule == "nobody") {
-		rules.push_back(MTP_inputPrivacyValueDisallowAll());
+	if (const auto base = PrivacyOptionToTL(rule)) {
+		rules.push_back(*base);
 	} else {
 		return toolError("rule must be everybody, contacts, close_friends "
 			"or nobody");
@@ -495,159 +556,27 @@ QJsonObject Server::toolSetPrivacy(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolUpdateLastSeenPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::LastSeen,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "last_seen"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "Last seen privacy update initiated"},
-	};
+	return updatePrivacyOption(u"last_seen"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolUpdateProfilePhotoPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::ProfilePhoto,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "profile_photo"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "Profile photo privacy update initiated"},
-	};
+	return updatePrivacyOption(u"profile_photo"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolUpdatePhoneNumberPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::PhoneNumber,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "phone_number"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "Phone number privacy update initiated"},
-	};
+	return updatePrivacyOption(u"phone_number"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolUpdateForwardsPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::Forwards,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "forwards"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "Forwards privacy update initiated"},
-	};
+	return updatePrivacyOption(u"forwards"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolUpdateBirthdayPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::Birthday,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "birthday"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "Birthday privacy update initiated"},
-	};
+	return updatePrivacyOption(u"birthday"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolUpdateAboutPrivacy(const QJsonObject &args) {
-	QString rule = args["rule"].toString();
-
-	if (!_session) {
-		return QJsonObject{
-			{"error", "No active session"},
-			{"status", "error"},
-		};
-	}
-
-	Api::UserPrivacy::Rule privacyRule;
-	privacyRule.option = stringToPrivacyOption(rule);
-
-	_session->api().userPrivacy().save(
-		Api::UserPrivacy::Key::About,
-		privacyRule
-	);
-
-	return QJsonObject{
-		{"setting", "about"},
-		{"rule", rule},
-		{"status", "success"},
-		{"note", "About privacy update initiated"},
-	};
+	return updatePrivacyOption(u"about"_q, args["rule"].toString());
 }
 
 QJsonObject Server::toolGetBlockedUsers(const QJsonObject &args) {
