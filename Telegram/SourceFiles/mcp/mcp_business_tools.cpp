@@ -7,6 +7,9 @@
 #include "mcp_server_includes.h"
 #include "data/data_types.h"
 #include "media/audio/media_audio.h"
+#include "base/unixtime.h"
+#include "apiwrap.h"
+#include "api/api_sending.h"
 
 namespace MCP {
 // ===== BUSINESS EQUIVALENT FEATURES IMPLEMENTATION =====
@@ -636,251 +639,460 @@ QJsonObject Server::toolGetNextAvailableSlot(const QJsonObject &args) {
 	return result;
 }
 
-// AI Chatbot Tools
-QJsonObject Server::toolConfigureChatbot(const QJsonObject &args) {
-	QJsonObject result;
-	QString name = args["name"].toString();
-	QString personality = args.value("personality").toString("helpful");
-	QJsonArray triggerKeywords = args.value("trigger_keywords").toArray();
-	QString responseStyle = args.value("response_style").toString("concise");
+// AI chatbot: replies AS THE ACCOUNT in allowlisted chats, using the local oMLX server.
+namespace {
 
-	if (name.isEmpty()) {
-		result["error"] = "Missing name parameter";
-		result["success"] = false;
-		return result;
+constexpr auto kMaxIncomingAgeSeconds = 300;
+
+struct ChatbotConfig {
+	bool active = false;
+	QString name;
+	QString personality;
+	QString responseStyle;
+	QStringList keywords;
+	QSet<qint64> allowedChats;
+	QString omlxUrl;
+	QString model;
+	int cooldownSeconds = 60;
+	int maxPerHour = 20;
+	int handled = 0;
+};
+
+void EnsureChatbotRow(QSqlDatabase &db) {
+	QSqlQuery query(db);
+	query.exec("INSERT OR IGNORE INTO chatbot_config (id, enabled, "
+		"messages_handled, updated_at) VALUES (1, 0, 0, datetime('now'))");
+}
+
+[[nodiscard]] std::optional<ChatbotConfig> ReadChatbotConfig(QSqlDatabase &db) {
+	QSqlQuery query(db);
+	if (!query.exec("SELECT enabled, name, personality, response_style, "
+			"trigger_keywords, allowed_chats, omlx_url, model, "
+			"cooldown_seconds, max_per_hour, messages_handled "
+			"FROM chatbot_config WHERE id = 1")
+		|| !query.next()) {
+		return std::nullopt;
 	}
-
-	QSqlQuery query(_db);
-	query.prepare("INSERT OR REPLACE INTO chatbot_config (id, enabled, name, personality, trigger_keywords, response_style, updated_at) "
-				  "VALUES (1, 1, ?, ?, ?, ?, datetime('now'))");
-	query.addBindValue(name);
-	query.addBindValue(personality);
-	query.addBindValue(QJsonDocument(triggerKeywords).toJson(QJsonDocument::Compact));
-	query.addBindValue(responseStyle);
-
-	if (query.exec()) {
-		result["success"] = true;
-		result["name"] = name;
-		result["personality"] = personality;
-		result["response_style"] = responseStyle;
-	} else {
-		result["success"] = false;
-		result["error"] = "Failed to configure chatbot";
+	auto result = ChatbotConfig();
+	result.active = query.value(0).toBool();
+	result.name = query.value(1).toString();
+	result.personality = query.value(2).toString();
+	result.responseStyle = query.value(3).toString();
+	for (const auto &word : QJsonDocument::fromJson(
+			query.value(4).toByteArray()).array()) {
+		if (const auto text = word.toString().trimmed(); !text.isEmpty()) {
+			result.keywords.push_back(text);
+		}
 	}
-
+	for (const auto &id : QJsonDocument::fromJson(
+			query.value(5).toByteArray()).array()) {
+		result.allowedChats.insert(id.toVariant().toLongLong());
+	}
+	result.omlxUrl = query.value(6).toString();
+	result.model = query.value(7).toString();
+	if (!query.value(8).isNull()) {
+		result.cooldownSeconds = query.value(8).toInt();
+	}
+	if (!query.value(9).isNull()) {
+		result.maxPerHour = query.value(9).toInt();
+	}
+	result.handled = query.value(10).toInt();
 	return result;
+}
+
+[[nodiscard]] QJsonArray ChatbotTrainingExamples(QSqlDatabase &db) {
+	auto result = QJsonArray();
+	QSqlQuery query(db);
+	if (query.exec("SELECT input, output FROM chatbot_training "
+			"ORDER BY RANDOM() LIMIT 10")) {
+		while (query.next()) {
+			result.append(QJsonObject{
+				{ "input", query.value(0).toString() },
+				{ "output", query.value(1).toString() },
+			});
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QJsonObject DescribeChatbotConfig(
+		const ChatbotConfig &config,
+		bool backendConfigured) {
+	auto chats = QJsonArray();
+	for (const auto id : config.allowedChats) {
+		chats.append(id);
+	}
+	auto keywords = QJsonArray();
+	for (const auto &word : config.keywords) {
+		keywords.append(word);
+	}
+	return QJsonObject{
+		{ "active", config.active },
+		{ "name", config.name },
+		{ "personality", config.personality },
+		{ "response_style", config.responseStyle },
+		{ "trigger_keywords", keywords },
+		{ "allowed_chat_ids", chats },
+		{ "omlx_url", config.omlxUrl },
+		{ "model", config.model },
+		{ "backend_configured", backendConfigured },
+		{ "cooldown_seconds", config.cooldownSeconds },
+		{ "max_replies_per_hour", config.maxPerHour },
+		{ "messages_handled", config.handled },
+	};
+}
+
+} // namespace
+
+void Server::loadChatbotBackend() {
+	if (!_localLLM) {
+		return;
+	}
+	const auto config = ReadChatbotConfig(_db);
+	_localLLM->setBaseUrl(config ? config->omlxUrl : QString());
+	_localLLM->setModel(config ? config->model : QString());
+}
+
+void Server::maybeAutoReply(not_null<HistoryItem*> item) {
+	if (!_session || !_localLLM || item->out() || !item->isRegular()
+		|| item->isService()) {
+		return;
+	}
+	const auto from = item->from()->asUser();
+	if (!from || from->isBot() || from->isSelf()) {
+		return;
+	}
+	const auto text = item->originalText().text.trimmed();
+	const auto now = base::unixtime::now();
+	if (text.isEmpty() || (now - item->date() > kMaxIncomingAgeSeconds)) {
+		return;
+	}
+	const auto peer = item->history()->peer;
+	const auto chatId = qint64(peer->id.value);
+	if (_chatbotInFlight.contains(peer->id)) {
+		return;
+	}
+	const auto config = ReadChatbotConfig(_db);
+	if (!config
+		|| !config->active
+		|| !config->allowedChats.contains(chatId)
+		|| !_localLLM->isConfigured()) {
+		return;
+	}
+	if (!config->keywords.isEmpty()) {
+		const auto matched = ranges::any_of(config->keywords, [&](
+				const QString &word) {
+			return text.contains(word, Qt::CaseInsensitive);
+		});
+		if (!matched) {
+			return;
+		}
+	}
+	{
+		QSqlQuery query(_db);
+		query.prepare("SELECT "
+			"(SELECT MAX(created_at) FROM chatbot_replies WHERE chat_id = ?), "
+			"(SELECT COUNT(*) FROM chatbot_replies WHERE created_at > ?)");
+		query.addBindValue(chatId);
+		query.addBindValue(qint64(now - 3600));
+		if (!query.exec() || !query.next()) {
+			return;
+		}
+		const auto last = query.value(0).toLongLong();
+		if ((last && now - last < config->cooldownSeconds)
+			|| query.value(1).toInt() >= config->maxPerHour) {
+			return;
+		}
+	}
+	_chatbotInFlight.emplace(peer->id);
+	const auto session = _session;
+	const auto weak = QPointer<Server>(this);
+	const auto itemId = item->fullId();
+	const auto prompt = LocalLLM::ChatbotPrompt(
+		text,
+		config->personality,
+		config->responseStyle,
+		ChatbotTrainingExamples(_db));
+	_localLLM->completeAsync(prompt, [=](CompletionResult result) {
+		if (!weak || weak->_session != session) {
+			return;
+		}
+		weak->_chatbotInFlight.remove(itemId.peer);
+		const auto current = ReadChatbotConfig(weak->_db);
+		// Paused or un-listed while the model was thinking: send nothing.
+		if (!result.success
+			|| !current
+			|| !current->active
+			|| !current->allowedChats.contains(qint64(itemId.peer.value))) {
+			return;
+		}
+		const auto history = session->data().history(itemId.peer);
+		auto action = Api::SendAction(history);
+		action.replyTo.messageId = itemId;
+		auto message = Api::MessageToSend(action);
+		message.textWithTags = TextWithTags{ result.text };
+		session->api().sendMessage(std::move(message));
+		QSqlQuery log(weak->_db);
+		log.prepare("INSERT INTO chatbot_replies (chat_id, reply_to_id, "
+			"input, reply, model, created_at) VALUES (?, ?, ?, ?, ?, ?)");
+		log.addBindValue(qint64(itemId.peer.value));
+		log.addBindValue(qint64(itemId.msg.bare));
+		log.addBindValue(text);
+		log.addBindValue(result.text);
+		log.addBindValue(result.model);
+		log.addBindValue(qint64(base::unixtime::now()));
+		log.exec();
+		QSqlQuery count(weak->_db);
+		count.exec("UPDATE chatbot_config SET messages_handled = "
+			"messages_handled + 1 WHERE id = 1");
+	});
+}
+
+QJsonObject Server::toolConfigureChatbot(const QJsonObject &args) {
+	EnsureChatbotRow(_db);
+	// Only the named settings change; the allowlist and on/off state are left alone.
+	auto fields = std::vector<std::tuple<QString, QString, QJsonValue>>();
+	const auto take = [&](const QString &arg, const QString &column, QJsonValue v) {
+		if (!v.isUndefined()) {
+			fields.emplace_back(arg, column, v);
+		}
+	};
+	take("name", "name", args.value("name"));
+	take("personality", "personality", args.value("personality"));
+	take("response_style", "response_style", args.value("response_style"));
+	take("omlx_url", "omlx_url", args.value("omlx_url"));
+	take("model", "model", args.value("model"));
+	take("cooldown_seconds", "cooldown_seconds", args.value("cooldown_seconds"));
+	take("max_replies_per_hour", "max_per_hour", args.value("max_replies_per_hour"));
+	auto changed = QJsonArray();
+	for (const auto &[arg, column, v] : fields) {
+		QSqlQuery query(_db);
+		query.prepare(QString("UPDATE chatbot_config SET %1 = ?, "
+			"updated_at = datetime('now') WHERE id = 1").arg(column));
+		query.addBindValue(v.toVariant());
+		if (!query.exec()) {
+			return toolError("Could not store " + arg + ": "
+				+ query.lastError().text());
+		}
+		changed.append(arg);
+	}
+	if (args.contains("trigger_keywords")) {
+		QSqlQuery query(_db);
+		query.prepare("UPDATE chatbot_config SET trigger_keywords = ? WHERE id = 1");
+		query.addBindValue(QString::fromUtf8(QJsonDocument(
+			args["trigger_keywords"].toArray()).toJson(QJsonDocument::Compact)));
+		query.exec();
+		changed.append("trigger_keywords");
+	}
+	loadChatbotBackend();
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["changed"] = changed;
+	if (const auto config = ReadChatbotConfig(_db)) {
+		value["config"] = DescribeChatbotConfig(
+			*config,
+			_localLLM && _localLLM->isConfigured());
+	}
+	return value;
+}
+
+QJsonObject Server::toolConfigureAiChatbot(const QJsonObject &args) {
+	return toolConfigureChatbot(args);
 }
 
 QJsonObject Server::toolGetChatbotConfig(const QJsonObject &args) {
 	Q_UNUSED(args);
-	QJsonObject result;
-
-	QSqlQuery query(_db);
-	query.prepare("SELECT enabled, name, personality, trigger_keywords, response_style, messages_handled "
-				  "FROM chatbot_config WHERE id = 1");
-
-	if (query.exec() && query.next()) {
-		result["enabled"] = query.value(0).toBool();
-		result["name"] = query.value(1).toString();
-		result["personality"] = query.value(2).toString();
-		result["trigger_keywords"] = QJsonDocument::fromJson(query.value(3).toByteArray()).array();
-		result["response_style"] = query.value(4).toString();
-		result["messages_handled"] = query.value(5).toInt();
-		result["success"] = true;
-	} else {
-		result["success"] = true;
-		result["note"] = "No chatbot configured";
+	EnsureChatbotRow(_db);
+	const auto config = ReadChatbotConfig(_db);
+	if (!config) {
+		return toolError("Could not read the chatbot settings");
 	}
+	auto value = DescribeChatbotConfig(
+		*config,
+		_localLLM && _localLLM->isConfigured());
+	value["success"] = true;
+	return value;
+}
 
-	return result;
+QJsonObject Server::toolSetChatbotChats(const QJsonObject &args) {
+	EnsureChatbotRow(_db);
+	auto config = ReadChatbotConfig(_db);
+	if (!config) {
+		return toolError("Could not read the chatbot settings");
+	}
+	for (const auto &id : args["add_chat_ids"].toArray()) {
+		const auto chatId = id.toVariant().toLongLong();
+		if (!resolvePeer(chatId)) {
+			return toolError(QString("No chat %1 in this client's data"
+				).arg(chatId));
+		}
+		config->allowedChats.insert(chatId);
+	}
+	for (const auto &id : args["remove_chat_ids"].toArray()) {
+		config->allowedChats.remove(id.toVariant().toLongLong());
+	}
+	auto list = QJsonArray();
+	for (const auto id : config->allowedChats) {
+		list.append(id);
+	}
+	QSqlQuery query(_db);
+	query.prepare("UPDATE chatbot_config SET allowed_chats = ? WHERE id = 1");
+	query.addBindValue(QString::fromUtf8(
+		QJsonDocument(list).toJson(QJsonDocument::Compact)));
+	if (!query.exec()) {
+		return toolError("Could not store the allowlist: "
+			+ query.lastError().text());
+	}
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["allowed_chat_ids"] = list;
+	return value;
+}
+
+QJsonObject Server::toolPauseChatbot(const QJsonObject &args) {
+	Q_UNUSED(args);
+	EnsureChatbotRow(_db);
+	QSqlQuery query(_db);
+	query.exec("UPDATE chatbot_config SET enabled = 0 WHERE id = 1");
+	return QJsonObject{ { "success", true }, { "active", false } };
+}
+
+QJsonObject Server::toolResumeChatbot(const QJsonObject &args) {
+	Q_UNUSED(args);
+	EnsureChatbotRow(_db);
+	const auto config = ReadChatbotConfig(_db);
+	if (!_localLLM || !_localLLM->isConfigured()) {
+		return toolError("Set omlx_url with configure_chatbot before resuming");
+	}
+	QSqlQuery query(_db);
+	query.exec("UPDATE chatbot_config SET enabled = 1 WHERE id = 1");
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["active"] = true;
+	value["allowed_chats"] = config ? int(config->allowedChats.size()) : 0;
+	if (!config || config->allowedChats.isEmpty()) {
+		value["note"] = "Active, but the allowlist is empty, so it replies "
+			"nowhere until set_chatbot_chats adds a chat.";
+	}
+	return value;
+}
+
+QJsonObject Server::toolSetChatbotPrompt(const QJsonObject &args) {
+	if (args["prompt"].toString().isEmpty()) {
+		return toolError("prompt is required");
+	}
+	auto forwarded = QJsonObject();
+	forwarded["personality"] = args["prompt"];
+	return toolConfigureChatbot(forwarded);
 }
 
 QJsonObject Server::toolTrainChatbot(const QJsonObject &args) {
-	QJsonObject result;
-	QJsonArray trainingData = args["training_data"].toArray();
-
-	if (trainingData.isEmpty()) {
-		result["error"] = "Missing or empty training_data";
-		result["success"] = false;
-		return result;
+	const auto data = args["training_data"].toArray();
+	if (data.isEmpty()) {
+		return toolError("training_data is required: [{input, output}]");
 	}
-
-	// Store training data in chatbot_training table
+	const auto category = args.value("category").toString("general");
+	auto added = 0;
 	_db.transaction();
-	QSqlQuery insertQuery(_db);
-	insertQuery.prepare(
-		"INSERT INTO chatbot_training (input, output, category) "
-		"VALUES (?, ?, ?)");
-
-	QString category = args.value("category").toString("general");
-	int added = 0;
-	for (const auto &item : trainingData) {
-		QJsonObject dataItem = item.toObject();
-		QString input = dataItem["input"].toString();
-		QString output = dataItem["output"].toString();
-
-		if (!input.isEmpty() && !output.isEmpty()) {
-			insertQuery.addBindValue(input);
-			insertQuery.addBindValue(output);
-			insertQuery.addBindValue(dataItem.value("category").toString(category));
-			insertQuery.exec();
-			insertQuery.finish();
-			added++;
+	for (const auto &entry : data) {
+		const auto example = entry.toObject();
+		const auto input = example["input"].toString();
+		const auto output = example["output"].toString();
+		if (input.isEmpty() || output.isEmpty()) {
+			continue;
 		}
+		QSqlQuery query(_db);
+		query.prepare("INSERT INTO chatbot_training (input, output, category) "
+			"VALUES (?, ?, ?)");
+		query.addBindValue(input);
+		query.addBindValue(output);
+		query.addBindValue(example.value("category").toString(category));
+		added += query.exec() ? 1 : 0;
 	}
 	_db.commit();
-
-	// If local LLM is available, verify it can use the training data
-	bool llmAvailable = _localLLM && _localLLM->isRunning();
-	QString llmModel;
-	if (llmAvailable) {
-		llmModel = _localLLM->model();
-		// Optionally test with a sample from the training data
-		if (added > 0 && args.value("test_after_train").toBool(false)) {
-			// Get the chatbot personality for context
-			QSqlQuery configQuery(_db);
-			configQuery.prepare("SELECT personality, response_style FROM chatbot_config WHERE id = 1");
-			if (configQuery.exec() && configQuery.next()) {
-				QString personality = configQuery.value(0).toString();
-				QString responseStyle = configQuery.value(1).toString();
-
-				// Use first training example as test
-				QJsonObject firstItem = trainingData.first().toObject();
-				QString testInput = firstItem["input"].toString();
-
-				auto completion = _localLLM->chatbot(testInput, personality, responseStyle, trainingData);
-				if (completion.success) {
-					result["test_input"] = testInput;
-					result["test_response"] = completion.text;
-					result["test_model"] = completion.model;
-				}
-			}
-		}
-	}
-
-	result["success"] = true;
-	result["training_samples_added"] = added;
-	result["llm_available"] = llmAvailable;
-	if (llmAvailable) {
-		result["llm_model"] = llmModel;
-		result["status"] = "trained";
-		result["note"] = QString("Training data stored. Local LLM (%1) will use these as few-shot examples for chatbot responses.").arg(llmModel);
-	} else {
-		result["status"] = "data_stored";
-		result["note"] = "Training data persisted. Install Ollama (ollama.com) and pull a model to enable AI chatbot.";
-	}
-
-	return result;
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["examples_added"] = added;
+	value["note"] = "Stored as few-shot examples; up to 10 are put into each "
+		"prompt. Nothing is fine-tuned.";
+	return value;
 }
 
 QJsonObject Server::toolTestChatbot(const QJsonObject &args) {
-	QJsonObject result;
-	QString testInput = args["input"].toString();
-
-	if (testInput.isEmpty()) {
-		result["error"] = "Missing input parameter";
-		result["success"] = false;
-		return result;
+	const auto input = args["input"].toString();
+	if (input.isEmpty()) {
+		return toolError("input is required");
 	}
-
-	// Get chatbot config
-	QSqlQuery query(_db);
-	query.prepare("SELECT personality, response_style FROM chatbot_config WHERE id = 1 AND enabled = 1");
-
-	if (!query.exec() || !query.next()) {
-		result["error"] = "No active chatbot configured";
-		result["success"] = false;
-		return result;
+	EnsureChatbotRow(_db);
+	const auto config = ReadChatbotConfig(_db);
+	if (!config || !_localLLM || !_localLLM->isConfigured()) {
+		return toolError("oMLX backend not configured: set omlx_url with "
+			"configure_chatbot");
 	}
-
-	QString personality = query.value(0).toString();
-	QString responseStyle = query.value(1).toString();
-
-	// Check if local LLM is available
-	if (!_localLLM || !_localLLM->isRunning()) {
-		result["success"] = false;
-		result["error"] = "No local LLM available. Install Ollama (ollama.com) and pull a model (e.g. 'ollama pull llama3.1:8b').";
-		return result;
+	const auto examples = ChatbotTrainingExamples(_db);
+	const auto result = _localLLM->complete(LocalLLM::ChatbotPrompt(
+		input,
+		config->personality,
+		config->responseStyle,
+		examples));
+	if (!result.success) {
+		return toolError("oMLX: " + result.error);
 	}
-
-	if (!_localLLM->healthCheck()) {
-		result["success"] = false;
-		result["error"] = "Local LLM backend is not responding. Ensure Ollama is running ('ollama serve').";
-		return result;
-	}
-
-	// Fetch training examples for few-shot context
-	QJsonArray trainingExamples;
-	QSqlQuery trainingQuery(_db);
-	trainingQuery.prepare(
-		"SELECT input, output FROM chatbot_training "
-		"ORDER BY RANDOM() LIMIT 10"
-	);
-	if (trainingQuery.exec()) {
-		while (trainingQuery.next()) {
-			QJsonObject ex;
-			ex["input"] = trainingQuery.value(0).toString();
-			ex["output"] = trainingQuery.value(1).toString();
-			trainingExamples.append(ex);
-		}
-	}
-
-	// Get conversation history for context
-	QString botName = "default";
-	QSqlQuery nameQuery(_db);
-	nameQuery.prepare("SELECT name FROM chatbot_config WHERE id = 1");
-	if (nameQuery.exec() && nameQuery.next()) {
-		botName = nameQuery.value(0).toString();
-	}
-
-	// Call local LLM
-	auto completion = _localLLM->chatbot(
-		testInput, personality, responseStyle, trainingExamples);
-
-	if (!completion.success) {
-		result["success"] = false;
-		result["error"] = QString("LLM generation failed: %1").arg(completion.error);
-		return result;
-	}
-
-	// Store conversation for future context
-	_localLLM->storeConversation(botName, testInput, completion.text);
-
-	// Increment messages_handled counter
-	QSqlQuery updateQuery(_db);
-	updateQuery.prepare("UPDATE chatbot_config SET messages_handled = messages_handled + 1 WHERE id = 1");
-	updateQuery.exec();
-
-	result["success"] = true;
-	result["input"] = testInput;
-	result["response"] = completion.text;
-	result["personality"] = personality;
-	result["response_style"] = responseStyle;
-	result["model"] = completion.model;
-	result["prompt_tokens"] = completion.promptTokens;
-	result["completion_tokens"] = completion.completionTokens;
-	result["duration_seconds"] = completion.durationSeconds;
-	result["training_examples_used"] = trainingExamples.size();
-
-	return result;
+	// Generation only: nothing is sent and messages_handled does not move.
+	auto value = QJsonObject();
+	value["success"] = true;
+	value["sent"] = false;
+	value["input"] = input;
+	value["response"] = result.text;
+	value["model"] = result.model;
+	value["duration_seconds"] = result.durationSeconds;
+	value["training_examples_used"] = examples.size();
+	return value;
 }
 
 QJsonObject Server::toolGetChatbotAnalytics(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QJsonObject result;
-
-	QSqlQuery query(_db);
-	query.prepare("SELECT messages_handled FROM chatbot_config WHERE id = 1");
-
-	if (query.exec() && query.next()) {
-		result["messages_handled"] = query.value(0).toInt();
-		result["success"] = true;
-	} else {
-		result["messages_handled"] = 0;
-		result["success"] = true;
+	const auto limit = clampLimit(args.value("limit").toInt(20), 20, 200);
+	const auto now = qint64(base::unixtime::now());
+	auto value = QJsonObject();
+	value["success"] = true;
+	if (const auto config = ReadChatbotConfig(_db)) {
+		value["active"] = config->active;
+		value["messages_handled"] = config->handled;
 	}
+	QSqlQuery count(_db);
+	count.prepare("SELECT COUNT(*) FROM chatbot_replies WHERE created_at > ?");
+	count.addBindValue(now - 3600);
+	if (count.exec() && count.next()) {
+		value["replies_last_hour"] = count.value(0).toInt();
+	}
+	auto recent = QJsonArray();
+	QSqlQuery query(_db);
+	query.prepare("SELECT chat_id, reply_to_id, input, reply, model, created_at "
+		"FROM chatbot_replies ORDER BY created_at DESC LIMIT ?");
+	query.addBindValue(limit);
+	if (query.exec()) {
+		while (query.next()) {
+			recent.append(QJsonObject{
+				{ "chat_id", query.value(0).toLongLong() },
+				{ "in_reply_to", query.value(1).toLongLong() },
+				{ "incoming", query.value(2).toString() },
+				{ "reply", query.value(3).toString() },
+				{ "model", query.value(4).toString() },
+				{ "date", query.value(5).toLongLong() },
+			});
+		}
+	}
+	value["recent_replies"] = recent;
+	if (_localLLM) {
+		const auto stats = _localLLM->stats();
+		value["omlx_requests"] = stats.totalRequests;
+		value["omlx_failures"] = stats.failedRequests;
+	}
+	return value;
+}
 
-	return result;
+QJsonObject Server::toolGetChatbotStats(const QJsonObject &args) {
+	return toolGetChatbotAnalytics(args);
 }
 
 // Text to Speech Tools

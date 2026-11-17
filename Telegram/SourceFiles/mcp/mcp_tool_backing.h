@@ -434,6 +434,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"set_channel_username",          Backing::Mtproto },
 	{"set_chat_photo",                Backing::Mtproto },
 	{"set_chat_rules",                Backing::LocalOnly },
+	{"set_chatbot_chats",             Backing::LocalOnly },
 	{"set_chatbot_prompt",            Backing::LocalOnly },
 	{"set_community_collapsed",       Backing::LiveSession },
 	{"set_content_price",             Backing::LocalOnly },

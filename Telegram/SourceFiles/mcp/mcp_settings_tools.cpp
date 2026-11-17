@@ -893,58 +893,6 @@ QJsonObject Server::toolConfigureVideoAvatar(const QJsonObject &args) {
 }
 
 // ============================================================================
-// AI CHATBOT TOOLS - delegate to business tools implementations
-// ============================================================================
-
-QJsonObject Server::toolConfigureAiChatbot(const QJsonObject &args) {
-	return toolConfigureChatbot(args);
-}
-
-QJsonObject Server::toolResumeChatbot(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QSqlQuery query(_db);
-	query.prepare("UPDATE chatbot_config SET enabled = 1 WHERE id = 1");
-
-	QJsonObject result;
-	if (query.exec()) {
-		result["success"] = true;
-		result["enabled"] = true;
-	} else {
-		result["success"] = false;
-		result["error"] = "No chatbot configured to resume";
-	}
-	return result;
-}
-
-QJsonObject Server::toolGetChatbotStats(const QJsonObject &args) {
-	return toolGetChatbotAnalytics(args);
-}
-
-QJsonObject Server::toolSetChatbotPrompt(const QJsonObject &args) {
-	QString prompt = args["prompt"].toString();
-	if (prompt.isEmpty()) {
-		QJsonObject result;
-		result["error"] = "Missing prompt parameter";
-		result["success"] = false;
-		return result;
-	}
-
-	QSqlQuery query(_db);
-	query.prepare("UPDATE chatbot_config SET personality = ? WHERE id = 1");
-	query.addBindValue(prompt);
-
-	QJsonObject result;
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["prompt"] = prompt;
-	} else {
-		result["success"] = false;
-		result["error"] = "No chatbot configured - configure one first";
-	}
-	return result;
-}
-
-// ============================================================================
 // GREETING TOOLS - delegate to business tools implementations
 // ============================================================================
 
@@ -2854,27 +2802,6 @@ QJsonObject Server::toolGetAwayStats(const QJsonObject &args) {
 
 QJsonObject Server::toolIsOpenNow(const QJsonObject &args) {
 	return toolCheckBusinessStatus(args);
-}
-
-// ============================================================================
-// CHATBOT - delegate to business tools
-// ============================================================================
-
-QJsonObject Server::toolPauseChatbot(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QSqlQuery query(_db);
-	query.prepare("UPDATE chatbot_config SET enabled = 0 WHERE id = 1");
-
-	QJsonObject result;
-	if (query.exec() && query.numRowsAffected() > 0) {
-		result["success"] = true;
-		result["enabled"] = false;
-		result["note"] = "Chatbot paused";
-	} else {
-		result["success"] = false;
-		result["error"] = "No chatbot configured";
-	}
-	return result;
 }
 
 // ============================================================================

@@ -258,6 +258,11 @@ bool Server::start(TransportType transport) {
 		q.exec("CREATE TABLE IF NOT EXISTS business_hours (id INTEGER PRIMARY KEY, enabled INTEGER, schedule TEXT, timezone TEXT DEFAULT 'UTC', updated_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS business_location (id INTEGER PRIMARY KEY, address TEXT, latitude REAL, longitude REAL, updated_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS chatbot_config (id INTEGER PRIMARY KEY, enabled INTEGER, name TEXT, personality TEXT, trigger_keywords TEXT, response_style TEXT, messages_handled INTEGER DEFAULT 0, updated_at TEXT)");
+		// Added for the oMLX auto-replier; ALTER fails harmlessly once the column exists.
+		for (const auto &column : { "omlx_url TEXT", "model TEXT", "allowed_chats TEXT", "cooldown_seconds INTEGER", "max_per_hour INTEGER" }) {
+			q.exec(QString("ALTER TABLE chatbot_config ADD COLUMN ") + column);
+		}
+		q.exec("CREATE TABLE IF NOT EXISTS chatbot_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, reply_to_id INTEGER, input TEXT, reply TEXT, model TEXT, created_at INTEGER)");
 		q.exec("CREATE TABLE IF NOT EXISTS chatbot_training (id INTEGER PRIMARY KEY AUTOINCREMENT, input TEXT NOT NULL, output TEXT NOT NULL, category TEXT DEFAULT 'general', created_at TEXT DEFAULT (datetime('now')))");
 		q.exec("CREATE TABLE IF NOT EXISTS voice_persona (name TEXT PRIMARY KEY, voice_id TEXT, pitch REAL DEFAULT 1.0, speed REAL DEFAULT 1.0, created_at TEXT)");
 		// TTS cache for generated audio (content-addressable by SHA256 of text+voice+speed+pitch)
@@ -563,18 +568,15 @@ void Server::initializeSessionComponents() {
 	fprintf(stderr, "[MCP] GradualArchiver initialized\n");
 	fflush(stderr);
 
-	// LocalLLM - local LLM via Ollama/llama.cpp for chatbot + translation
+	// LocalLLM - the oMLX client; it stays unconfigured until configure_chatbot stores a URL.
 	_localLLM = std::make_unique<LocalLLM>(this);
-	if (_localLLM->start(&_db)) {
-		fprintf(stderr, "[MCP] LocalLLM initialized (provider: %s, model: %s)\n",
-			(_localLLM->provider() == LLMProvider::Ollama ? "Ollama" : "llama.cpp"),
-			qPrintable(_localLLM->model()));
-		fflush(stderr);
-	} else {
-		qWarning() << "MCP: Failed to start LocalLLM";
-		fprintf(stderr, "[MCP] WARNING: LocalLLM failed to start\n");
-		fflush(stderr);
-	}
+	loadChatbotBackend();
+
+	// The chatbot answers incoming messages itself; it does not depend on BotManager.
+	_session->data().newItemAdded(
+	) | rpl::on_next([this](not_null<HistoryItem*> item) {
+		maybeAutoReply(item);
+	}, _session->lifetime());
 
 	// TextToSpeech - local TTS via Piper/espeak-ng/Coqui
 	_textToSpeech = std::make_unique<TextToSpeech>(this);
@@ -1756,6 +1758,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["pause_chatbot"] = [this](const QJsonObject &args) { return toolPauseChatbot(args); };
 	_toolHandlers["resume_chatbot"] = [this](const QJsonObject &args) { return toolResumeChatbot(args); };
 	_toolHandlers["set_chatbot_prompt"] = [this](const QJsonObject &args) { return toolSetChatbotPrompt(args); };
+	_toolHandlers["set_chatbot_chats"] = [this](const QJsonObject &args) { return toolSetChatbotChats(args); };
 	_toolHandlers["get_chatbot_stats"] = [this](const QJsonObject &args) { return toolGetChatbotStats(args); };
 	_toolHandlers["train_chatbot"] = [this](const QJsonObject &args) { return toolTrainChatbot(args); };
 

@@ -2844,61 +2844,62 @@ void Server::registerTools() {
 		// AI Chatbot - 7 tools
 		Tool{
 			"configure_ai_chatbot",
-			"Configure AI chatbot settings",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"name", QJsonObject{{"type", "string"}, {"description", "Human-readable name."}}},
-					{"personality", QJsonObject{{"type", "string"}, {"description", "System persona the chatbot answers in."}}},
-					{"response_style", QJsonObject{{"type", "string"}, {"description", "Reply length and tone."}}},
-					{"trigger_keywords", QJsonObject{{"type", "array"}, {"description", "Keywords that trigger a reply, as an array of strings."}}},
-				}},
-				{"required", QJsonArray{}}
-			}
+			"Configure the chatbot that auto-replies AS YOU in allowlisted chats using local oMLX; only named settings change",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"name", QJsonObject{{"type", "string"}, {"description", "Name for this chatbot."}}},
+				{"personality", QJsonObject{{"type", "string"}, {"description", "Persona the replies are written in."}}},
+				{"response_style", QJsonObject{{"type", "string"}, {"description", "Reply length and tone."}}},
+				{"trigger_keywords", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Reply only to messages containing one of these; empty replies to every message in allowlisted chats."}}},
+				{"omlx_url", QJsonObject{{"type", "string"}, {"description", "Base URL of your local oMLX server, e.g. http://127.0.0.1:PORT. Required before it can run."}}},
+				{"model", QJsonObject{{"type", "string"}, {"description", "oMLX model id; omit to let oMLX pick."}}},
+				{"cooldown_seconds", QJsonObject{{"type", "integer"}, {"description", "Minimum seconds between replies in one chat (default 60)."}}},
+				{"max_replies_per_hour", QJsonObject{{"type", "integer"}, {"description", "Cap on replies per hour across all chats (default 20)."}}}
+			}}}
 		},
 		Tool{
 			"get_chatbot_config",
-			"Get AI chatbot configuration",
+			"Chatbot settings: active, allowlisted chats, oMLX URL and model, keywords, limits",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
 			"pause_chatbot",
-			"Pause the AI chatbot",
+			"Stop the chatbot from auto-replying as you; settings are kept",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
 			"resume_chatbot",
-			"Resume the AI chatbot",
+			"Let the chatbot auto-reply AS YOU again, only in allowlisted chats; needs omlx_url",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
 			"set_chatbot_prompt",
-			"Update the chatbot system prompt",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"prompt", QJsonObject{{"type", "string"}, {"description", "System prompt the chatbot answers with."}}}
-				}},
-				{"required", QJsonArray{"prompt"}}
-			}
+			"Set the persona the chatbot's replies are written in",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"prompt", QJsonObject{{"type", "string"}, {"description", "Persona / system prompt."}}}
+			}}, {"required", QJsonArray{"prompt"}}}
 		},
 		Tool{
 			"get_chatbot_stats",
-			"Get chatbot usage statistics",
-			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+			"Replies the chatbot actually sent as you: counts, last hour, and the most recent ones",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"limit", QJsonObject{{"type", "integer"}, {"description", "Recent replies to list (default 20, max 200)."}}}
+			}}}
 		},
 		Tool{
 			"train_chatbot",
-			"Add training data to chatbot",
-			QJsonObject{
-				{"type", "object"},
-				{"properties", QJsonObject{
-					{"training_data", QJsonObject{{"type", "array"}, {"description", "Array of {input, output} examples"}}},
-					{"category", QJsonObject{{"type", "string"}, {"description", "Restrict results to one marketplace category; omit for all categories."}}},
-					{"test_after_train", QJsonObject{{"type", "boolean"}, {"description", "Run a test exchange once training finishes (default false)."}}},
-				}},
-				{"required", QJsonArray{"training_data"}}
-			}
+			"Add example exchanges; up to 10 are placed in each prompt as few-shot examples (no fine-tuning)",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"training_data", QJsonObject{{"type", "array"}, {"description", "Array of {input, output} examples."}}},
+				{"category", QJsonObject{{"type", "string"}, {"description", "Label stored with these examples (default general)."}}}
+			}}, {"required", QJsonArray{"training_data"}}}
+		},
+		Tool{
+			"set_chatbot_chats",
+			"Add or remove chats the chatbot may auto-reply in as you; it replies nowhere else",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"add_chat_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Chats to allow."}}},
+				{"remove_chat_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Chats to remove."}}}
+			}}}
 		},
 
 		// AI Voice (TTS) - 5 tools
@@ -4745,16 +4746,34 @@ void Server::registerTools() {
 		Tool{"get_next_available_slot", "Get next available business hours slot", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
 
 		// --- AI Chatbot ---
-		Tool{"configure_chatbot", "Configure AI chatbot settings", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"name", QJsonObject{{"type", "string"}, {"description", "Chatbot name"}}},
-			{"personality", QJsonObject{{"type", "string"}, {"description", "Personality style"}}},
-					{"response_style", QJsonObject{{"type", "string"}, {"description", "Reply length and tone (default concise)."}}},
-					{"trigger_keywords", QJsonObject{{"type", "array"}, {"description", "Keywords that trigger a reply, as an array of strings."}}},
-				}}, {"required", QJsonArray{"name"}}}},
-		Tool{"test_chatbot", "Test chatbot with sample input", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"input", QJsonObject{{"type", "string"}, {"description", "Test message"}}}
-		}}, {"required", QJsonArray{"input"}}}},
-		Tool{"get_chatbot_analytics", "Get chatbot usage analytics", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+		Tool{
+			"configure_chatbot",
+			"Configure the chatbot that auto-replies AS YOU in allowlisted chats using local oMLX; only named settings change",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"name", QJsonObject{{"type", "string"}, {"description", "Name for this chatbot."}}},
+				{"personality", QJsonObject{{"type", "string"}, {"description", "Persona the replies are written in."}}},
+				{"response_style", QJsonObject{{"type", "string"}, {"description", "Reply length and tone."}}},
+				{"trigger_keywords", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "Reply only to messages containing one of these; empty replies to every message in allowlisted chats."}}},
+				{"omlx_url", QJsonObject{{"type", "string"}, {"description", "Base URL of your local oMLX server, e.g. http://127.0.0.1:PORT. Required before it can run."}}},
+				{"model", QJsonObject{{"type", "string"}, {"description", "oMLX model id; omit to let oMLX pick."}}},
+				{"cooldown_seconds", QJsonObject{{"type", "integer"}, {"description", "Minimum seconds between replies in one chat (default 60)."}}},
+				{"max_replies_per_hour", QJsonObject{{"type", "integer"}, {"description", "Cap on replies per hour across all chats (default 20)."}}}
+			}}}
+		},
+		Tool{
+			"test_chatbot",
+			"Generate the reply the chatbot would send to a message, without sending anything",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"input", QJsonObject{{"type", "string"}, {"description", "Message to answer."}}}
+			}}, {"required", QJsonArray{"input"}}}
+		},
+		Tool{
+			"get_chatbot_analytics",
+			"Replies the chatbot actually sent as you: counts, last hour, and the most recent ones",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"limit", QJsonObject{{"type", "integer"}, {"description", "Recent replies to list (default 20, max 200)."}}}
+			}}}
+		},
 
 		// --- TTS/Video ---
 		Tool{"text_to_speech", "Convert text to speech audio", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

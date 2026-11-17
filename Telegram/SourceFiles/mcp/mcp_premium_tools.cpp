@@ -169,68 +169,80 @@ QJsonObject Server::toolTranslateMessage(const QJsonObject &args) {
 		return result;
 	}
 
-	// Translate using local LLM if available
-	if (_localLLM && _localLLM->isRunning()) {
-		auto completion = _localLLM->translate(
+	const auto cache = [&](const QString &translated, const QString &engine) {
+		QSqlQuery insertQuery(_db);
+		insertQuery.prepare(R"(
+			INSERT OR REPLACE INTO translation_cache
+			(chat_id, message_id, original_text, translated_text, source_language, target_language, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		)");
+		insertQuery.addBindValue(chatId);
+		insertQuery.addBindValue(messageId);
+		insertQuery.addBindValue(originalText);
+		insertQuery.addBindValue(translated);
+		insertQuery.addBindValue(sourceLanguage);
+		insertQuery.addBindValue(targetLanguage);
+		insertQuery.addBindValue(QDateTime::currentSecsSinceEpoch());
+		insertQuery.exec();
+		result["success"] = true;
+		result["original_text"] = originalText;
+		result["translated_text"] = translated;
+		result["target_language"] = targetLanguage;
+		result["source_language"] = sourceLanguage;
+		result["engine"] = engine;
+		result["cached"] = false;
+	};
+
+	// The local oMLX server first, when one is configured.
+	if (_localLLM && _localLLM->isConfigured()) {
+		const auto completion = _localLLM->translate(
 			originalText,
 			targetLanguage,
 			(sourceLanguage == "auto") ? QString() : sourceLanguage);
-
 		if (completion.success) {
-			// Store translated text in cache
-			QSqlQuery insertQuery(_db);
-			insertQuery.prepare(R"(
-				INSERT OR REPLACE INTO translation_cache
-				(chat_id, message_id, original_text, translated_text, source_language, target_language, created_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-			)");
-			insertQuery.addBindValue(chatId);
-			insertQuery.addBindValue(messageId);
-			insertQuery.addBindValue(originalText);
-			insertQuery.addBindValue(completion.text);
-			insertQuery.addBindValue(sourceLanguage);
-			insertQuery.addBindValue(targetLanguage);
-			insertQuery.addBindValue(QDateTime::currentSecsSinceEpoch());
-			insertQuery.exec();
-
-			result["success"] = true;
-			result["original_text"] = originalText;
-			result["translated_text"] = completion.text;
-			result["target_language"] = targetLanguage;
-			result["source_language"] = sourceLanguage;
+			cache(completion.text, "omlx");
 			result["model"] = completion.model;
-			result["duration_seconds"] = completion.durationSeconds;
-			result["cached"] = false;
 			return result;
 		}
-
-		// LLM failed - fall through to pending state
-		result["llm_error"] = completion.error;
+		result["omlx_error"] = completion.error;
 	}
 
-	// No LLM or LLM failed - store original for later
-	QSqlQuery insertQuery(_db);
-	insertQuery.prepare(R"(
-		INSERT OR IGNORE INTO translation_cache
-		(chat_id, message_id, original_text, source_language, target_language, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	)");
-	insertQuery.addBindValue(chatId);
-	insertQuery.addBindValue(messageId);
-	insertQuery.addBindValue(originalText);
-	insertQuery.addBindValue(sourceLanguage);
-	insertQuery.addBindValue(targetLanguage);
-	insertQuery.addBindValue(QDateTime::currentSecsSinceEpoch());
-	insertQuery.exec();
-
-	result["success"] = true;
-	result["original_text"] = originalText;
-	result["target_language"] = targetLanguage;
-	result["source_language"] = sourceLanguage;
-	result["status"] = "translation_pending";
-	result["note"] = "No local LLM available for translation. "
-		"Install Ollama (ollama.com) and pull a model to enable translation.";
-
+	// Otherwise Telegram's own translation of the message.
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError("Chat not found");
+	}
+	const auto translated = awaitMtp([&](auto done, auto fail) {
+		using Flag = MTPmessages_TranslateText::Flag;
+		_session->api().request(MTPmessages_TranslateText(
+			MTP_flags(Flag::f_peer | Flag::f_id),
+			peer->input(),
+			MTP_vector<MTPint>(1, MTP_int(int(messageId))),
+			MTPVector<MTPTextWithEntities>(),
+			MTP_string(targetLanguage),
+			MTPstring()
+		)).done([=](const MTPmessages_TranslatedText &answer) {
+			const auto &list = answer.data().vresult().v;
+			auto value = QJsonObject();
+			if (list.isEmpty()) {
+				value = toolError("Telegram returned no translation");
+			} else {
+				value["success"] = true;
+				value["text"] = qs(list.front().data().vtext());
+			}
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail("messages.translateText: " + error.type());
+		}).send();
+	});
+	if (!translated["success"].toBool()) {
+		auto error = translated;
+		if (result.contains("omlx_error")) {
+			error["omlx_error"] = result["omlx_error"];
+		}
+		return error;
+	}
+	cache(translated["text"].toString(), "telegram");
 	return result;
 }
 

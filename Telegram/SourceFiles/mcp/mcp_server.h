@@ -473,6 +473,7 @@ private:
 	QJsonObject toolResumeChatbot(const QJsonObject &args);
 	QJsonObject toolSetChatbotPrompt(const QJsonObject &args);
 	QJsonObject toolGetChatbotStats(const QJsonObject &args);
+	QJsonObject toolSetChatbotChats(const QJsonObject &args);
 	QJsonObject toolTrainChatbot(const QJsonObject &args);
 
 	// AI Voice (TTS) - 5 tools
@@ -826,6 +827,10 @@ private:
 	// client has not loaded. Callers should report that as "chat not found"
 	// rather than distinguishing the cases, which are not distinguishable to
 	// the caller anyway.
+	// Replies as the account to an allowlisted chat's incoming message through oMLX.
+	void maybeAutoReply(not_null<HistoryItem*> item);
+	// Points the oMLX client at the URL and model stored in chatbot_config.
+	void loadChatbotBackend();
 	// Stars transactions with bots (all bots when `bot` is empty), read up to maxPages pages.
 	[[nodiscard]] QJsonObject scanMiniappTransactions(UserId bot, int maxPages);
 	// Changes a privacy key's base option and keeps its exceptions.
@@ -1011,6 +1016,7 @@ private:
 	std::unique_ptr<VoiceTranscription> _voiceTranscription;
 	std::unique_ptr<TextToSpeech> _textToSpeech;
 	std::unique_ptr<LocalLLM> _localLLM;
+	base::flat_set<PeerId> _chatbotInFlight;
 	std::unique_ptr<VideoGenerator> _videoGenerator;
 	std::unique_ptr<BotManager> _botManager;
 	std::unique_ptr<CacheManager> _cache;
