@@ -1758,6 +1758,8 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["pause_chatbot"] = [this](const QJsonObject &args) { return toolPauseChatbot(args); };
 	_toolHandlers["resume_chatbot"] = [this](const QJsonObject &args) { return toolResumeChatbot(args); };
 	_toolHandlers["set_chatbot_prompt"] = [this](const QJsonObject &args) { return toolSetChatbotPrompt(args); };
+	_toolHandlers["connect_business_bot"] = [this](const QJsonObject &args) { return toolConnectBusinessBot(args); };
+	_toolHandlers["disconnect_business_bot"] = [this](const QJsonObject &args) { return toolDisconnectBusinessBot(args); };
 	_toolHandlers["set_chatbot_chats"] = [this](const QJsonObject &args) { return toolSetChatbotChats(args); };
 	_toolHandlers["get_chatbot_stats"] = [this](const QJsonObject &args) { return toolGetChatbotStats(args); };
 	_toolHandlers["train_chatbot"] = [this](const QJsonObject &args) { return toolTrainChatbot(args); };

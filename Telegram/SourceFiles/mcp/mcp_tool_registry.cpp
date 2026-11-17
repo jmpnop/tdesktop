@@ -3350,6 +3350,25 @@ void Server::registerTools() {
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
 		},
 		Tool{
+			"connect_business_bot",
+			"Connect a Telegram Business bot to your account (or change its access): which chats it handles and what it may do",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"bot_id", QJsonObject{{"type", "integer"}, {"description", "User id of the bot."}}},
+				{"mode", QJsonObject{{"type", "string"}, {"description", "all_except (default): every chat except the listed ones; only: just the listed ones."}}},
+				{"chat_types", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "new_chats, existing_chats, contacts, non_contacts; excluded in all_except mode, included in only mode."}}},
+				{"user_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "Users excluded (all_except) or included (only)."}}},
+				{"exclude_user_ids", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "integer"}}}, {"description", "In only mode: users to leave out of the included chat types."}}},
+				{"permissions", QJsonObject{{"type", "array"}, {"items", QJsonObject{{"type", "string"}}}, {"description", "reply, mark_read, delete_sent, delete_received, edit_name, edit_bio, edit_profile_photo, edit_username, view_gifts, sell_gifts, gift_settings, transfer_gifts, transfer_stars, manage_stories. Default: reply, mark_read."}}}
+			}}, {"required", QJsonArray{"bot_id"}}}
+		},
+		Tool{
+			"disconnect_business_bot",
+			"Disconnect a Telegram Business bot from your account",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"bot_id", QJsonObject{{"type", "integer"}, {"description", "User id of the connected bot (see get_connected_bots)."}}}
+			}}, {"required", QJsonArray{"bot_id"}}}
+		},
+		Tool{
 			"set_global_privacy",
 			"Change account-wide privacy settings; only the named settings change",
 			QJsonObject{{"type", "object"}, {"properties", QJsonObject{

@@ -474,6 +474,8 @@ private:
 	QJsonObject toolSetChatbotPrompt(const QJsonObject &args);
 	QJsonObject toolGetChatbotStats(const QJsonObject &args);
 	QJsonObject toolSetChatbotChats(const QJsonObject &args);
+	QJsonObject toolConnectBusinessBot(const QJsonObject &args);
+	QJsonObject toolDisconnectBusinessBot(const QJsonObject &args);
 	QJsonObject toolTrainChatbot(const QJsonObject &args);
 
 	// AI Voice (TTS) - 5 tools

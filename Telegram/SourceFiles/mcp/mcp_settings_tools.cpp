@@ -7,6 +7,8 @@
 #include "mcp_server_includes.h"
 
 #include "api/api_global_privacy.h"
+#include "data/business/data_business_chatbots.h"
+#include "data/business/data_business_common.h"
 #include "wallet/wallet_session.h"
 
 namespace MCP {
@@ -3327,6 +3329,204 @@ QJsonObject Server::toolGetConnectedBots(const QJsonObject &args) {
 			value["connected_bots"] = list;
 			value["count"] = list.size();
 			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+namespace {
+
+[[nodiscard]] std::optional<Data::ChatbotsPermissions> BotPermissionsFromArgs(
+		const QJsonValue &value,
+		QString *error) {
+	using Right = Data::ChatbotsPermission;
+	static const auto names = std::vector<std::pair<QString, Right>>{
+		{ "reply", Right::ReplyToMessages },
+		{ "mark_read", Right::MarkAsRead },
+		{ "delete_sent", Right::DeleteSent },
+		{ "delete_received", Right::DeleteReceived },
+		{ "edit_name", Right::EditName },
+		{ "edit_bio", Right::EditBio },
+		{ "edit_profile_photo", Right::EditUserpic },
+		{ "edit_username", Right::EditUsername },
+		{ "view_gifts", Right::ViewGifts },
+		{ "sell_gifts", Right::SellGifts },
+		{ "gift_settings", Right::GiftSettings },
+		{ "transfer_gifts", Right::TransferGifts },
+		{ "transfer_stars", Right::TransferStars },
+		{ "manage_stories", Right::ManageStories },
+	};
+	// The bot always reads messages it is connected to; the rest are opt-in.
+	auto result = Data::ChatbotsPermissions(Right::ViewMessages);
+	if (value.isUndefined()) {
+		return result | Right::ReplyToMessages | Right::MarkAsRead;
+	}
+	for (const auto &entry : value.toArray()) {
+		const auto name = entry.toString();
+		const auto i = ranges::find(names, name, &std::pair<QString, Right>::first);
+		if (i == end(names)) {
+			auto known = QStringList();
+			for (const auto &[label, right] : names) {
+				known.push_back(label);
+			}
+			*error = "Unknown permission '" + name + "'; one of: "
+				+ known.join(", ");
+			return std::nullopt;
+		}
+		result |= i->second;
+	}
+	return result;
+}
+
+[[nodiscard]] Data::BusinessChatTypes BusinessChatTypesFromArgs(
+		const QJsonArray &list) {
+	using Type = Data::BusinessChatType;
+	auto result = Data::BusinessChatTypes();
+	for (const auto &entry : list) {
+		const auto name = entry.toString();
+		if (name == "new_chats") result |= Type::NewChats;
+		else if (name == "existing_chats") result |= Type::ExistingChats;
+		else if (name == "contacts") result |= Type::Contacts;
+		else if (name == "non_contacts") result |= Type::NonContacts;
+	}
+	return result;
+}
+
+} // namespace
+
+QJsonObject Server::toolConnectBusinessBot(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(args["bot_id"].toVariant().toLongLong());
+	const auto bot = peer ? peer->asUser() : nullptr;
+	if (!bot || !bot->isBot()) {
+		return toolError("bot_id must be the user id of a bot this client knows");
+	}
+	auto error = QString();
+	const auto permissions = BotPermissionsFromArgs(
+		args.value("permissions"),
+		&error);
+	if (!permissions) {
+		return toolError(error);
+	}
+	const auto collect = [&](const QString &field) {
+		auto result = std::vector<not_null<UserData*>>();
+		for (const auto &id : args[field].toArray()) {
+			const auto p = resolvePeer(id.toVariant().toLongLong());
+			const auto user = p ? p->asUser() : nullptr;
+			if (!user) {
+				error = QString("%1: no user %2 in this client's data"
+					).arg(field).arg(id.toVariant().toLongLong());
+				return result;
+			}
+			result.push_back(user);
+		}
+		return result;
+	};
+	const auto only = (args.value("mode").toString("all_except") == "only");
+	auto recipients = Data::BusinessRecipients();
+	recipients.allButExcluded = !only;
+	auto &chosen = only ? recipients.included : recipients.excluded;
+	chosen.types = BusinessChatTypesFromArgs(args["chat_types"].toArray());
+	chosen.list = collect("user_ids");
+	if (only) {
+		recipients.excluded.list = collect("exclude_user_ids");
+	}
+	if (!error.isEmpty()) {
+		return toolError(error);
+	}
+	if (only && recipients.included.empty()) {
+		return toolError("mode \"only\" needs chat_types or user_ids to "
+			"say which chats the bot may handle");
+	}
+	auto settings = Data::ChatbotsSettings{
+		.bot = bot,
+		.recipients = recipients,
+		.permissions = *permissions,
+	};
+	const auto session = _session;
+	auto &chatbots = _session->data().chatbots();
+	const auto describe = [=] {
+		auto value = QJsonObject();
+		value["success"] = true;
+		value["bot_id"] = qint64(bot->id.value);
+		value["bot_name"] = bot->name();
+		value["mode"] = only ? "only" : "all_except";
+		return value;
+	};
+	if (chatbots.loaded() && chatbots.current() == settings) {
+		auto value = describe();
+		value["changed"] = false;
+		return value;
+	}
+	return awaitMtp([&](auto done, auto fail) {
+		if (chatbots.loaded()) {
+			// Through the client's own cache, so Settings > Business shows the change.
+			chatbots.save(settings, [=] {
+				done(describe());
+			}, [=](const QString &type) {
+				fail(type);
+			});
+			return;
+		}
+		// Not cached yet; the next load reads the new state from Telegram.
+		using Flag = MTPaccount_UpdateConnectedBot::Flag;
+		session->api().request(MTPaccount_UpdateConnectedBot(
+			MTP_flags(Flag::f_rights),
+			Data::ToMTP(settings.permissions),
+			bot->inputUser(),
+			Data::ForBotsToMTP(settings.recipients)
+		)).done([=](const MTPUpdates &result) {
+			session->api().applyUpdates(result);
+			done(describe());
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolDisconnectBusinessBot(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(args["bot_id"].toVariant().toLongLong());
+	const auto bot = peer ? peer->asUser() : nullptr;
+	if (!bot || !bot->isBot()) {
+		return toolError("bot_id must be the user id of a bot this client "
+			"knows; see get_connected_bots");
+	}
+	const auto session = _session;
+	auto &chatbots = _session->data().chatbots();
+	const auto describe = [=] {
+		auto value = QJsonObject();
+		value["success"] = true;
+		value["bot_id"] = qint64(bot->id.value);
+		value["disconnected"] = true;
+		return value;
+	};
+	return awaitMtp([&](auto done, auto fail) {
+		if (chatbots.loaded() && chatbots.current().bot == bot) {
+			chatbots.save({}, [=] {
+				done(describe());
+			}, [=](const QString &type) {
+				fail(type);
+			});
+			return;
+		}
+		using Flag = MTPaccount_UpdateConnectedBot::Flag;
+		session->api().request(MTPaccount_UpdateConnectedBot(
+			MTP_flags(Flag::f_deleted),
+			MTPBusinessBotRights(),
+			bot->inputUser(),
+			MTP_inputBusinessBotRecipients(
+				MTP_flags(0),
+				MTPVector<MTPInputUser>(),
+				MTPVector<MTPInputUser>())
+		)).done([=](const MTPUpdates &result) {
+			session->api().applyUpdates(result);
+			done(describe());
 		}).fail([=](const MTP::Error &error) {
 			fail(error.type());
 		}).send();
