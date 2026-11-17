@@ -382,6 +382,11 @@ private:
 	QJsonObject toolListUsernames(const QJsonObject &args);
 	QJsonObject toolToggleUsername(const QJsonObject &args);
 	QJsonObject toolReorderUsernames(const QJsonObject &args);
+	QJsonObject toolGetActiveCall(const QJsonObject &args);
+	QJsonObject toolGetGroupCallInfo(const QJsonObject &args);
+	QJsonObject toolGetGroupCallParticipants(const QJsonObject &args);
+	QJsonObject toolExportGroupCallInvite(const QJsonObject &args);
+	QJsonObject toolGetGroupCallRtmpUrl(const QJsonObject &args);
 	QJsonObject toolTerminateSession(const QJsonObject &args);
 	QJsonObject toolBlockUser(const QJsonObject &args);
 	QJsonObject toolUnblockUser(const QJsonObject &args);

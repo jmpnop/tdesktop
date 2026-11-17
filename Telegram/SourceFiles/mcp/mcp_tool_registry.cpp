@@ -3607,6 +3607,44 @@ void Server::registerTools() {
 			}}, {"required", QJsonArray{"order"}}}
 		},
 
+		Tool{
+			"get_active_call",
+			"The call and voice chat this client is in right now, with state, mute and duration; null when there is none",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}
+		},
+		Tool{
+			"get_group_call_info",
+			"Title, participant count, recording, schedule and join settings of a chat's voice or video chat",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID that has the voice or video chat."}}}
+			}}, {"required", QJsonArray{"chat_id"}}}
+		},
+		Tool{
+			"get_group_call_participants",
+			"Participants of a chat's voice or video chat, with mute, video and raised-hand state; paged",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID that has the voice or video chat."}}},
+				{"limit", QJsonObject{{"type", "integer"}, {"description", "Max participants (default 100, max 500)."}}},
+				{"offset", QJsonObject{{"type", "string"}, {"description", "next_offset from the previous page."}}}
+			}}, {"required", QJsonArray{"chat_id"}}}
+		},
+		Tool{
+			"export_group_call_invite",
+			"Get an invite link to a chat's voice chat, as listener or as speaker",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID that has the voice or video chat."}}},
+				{"can_self_unmute", QJsonObject{{"type", "boolean"}, {"description", "true for a speaker link that lets joiners unmute themselves."}}}
+			}}, {"required", QJsonArray{"chat_id"}}}
+		},
+		Tool{
+			"get_group_call_rtmp_url",
+			"RTMP server URL and stream key for broadcasting into a chat's live stream from an external encoder",
+			QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+				{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Group or channel ID you can stream to."}}},
+				{"revoke", QJsonObject{{"type", "boolean"}, {"description", "true to issue a new stream key; the old one stops working."}}}
+			}}, {"required", QJsonArray{"chat_id"}}}
+		},
+
 		// Budget & Reporting - 5 tools
 		Tool{
 			"set_wallet_budget",

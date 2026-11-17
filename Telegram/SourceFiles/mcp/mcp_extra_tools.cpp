@@ -17,6 +17,11 @@
 #include "api/api_peer_photo.h"
 #include "api/api_user_names.h"
 #include "data/data_user_names.h"
+#include "data/data_group_call.h"
+#include "calls/calls_instance.h"
+#include "calls/calls_call.h"
+#include "calls/group/calls_group_call.h"
+#include "core/application.h"
 
 #include <QtCore/QEventLoop>
 
@@ -1838,6 +1843,297 @@ QJsonObject Server::toolReorderUsernames(const QJsonObject &args) {
 			fail("Usernames can only be reordered for yourself, a channel, "
 				"a supergroup or a bot you own");
 		}
+	});
+}
+
+// Wave 10 - read-only call tools; answering, hanging up and media stay in the UI.
+namespace {
+
+[[nodiscard]] QString CallStateName(Calls::Call::State state) {
+	using State = Calls::Call::State;
+	switch (state) {
+	case State::Starting: return u"starting"_q;
+	case State::WaitingInit:
+	case State::WaitingInitAck: return u"connecting"_q;
+	case State::ExchangingKeys: return u"exchanging_keys"_q;
+	case State::Established: return u"established"_q;
+	case State::Requesting: return u"requesting"_q;
+	case State::Waiting: return u"ringing"_q;
+	case State::WaitingIncoming: return u"incoming"_q;
+	case State::WaitingUserConfirmation: return u"waiting_confirmation"_q;
+	case State::Busy: return u"busy"_q;
+	case State::HangingUp:
+	case State::FailedHangingUp:
+	case State::MigrationHangingUp: return u"hanging_up"_q;
+	case State::Failed: return u"failed"_q;
+	case State::Ended: return u"ended"_q;
+	case State::EndedByOtherDevice: return u"ended_by_other_device"_q;
+	}
+	return u"unknown"_q;
+}
+
+[[nodiscard]] QString GroupCallStateName(Calls::GroupCall::State state) {
+	using State = Calls::GroupCall::State;
+	switch (state) {
+	case State::Creating: return u"creating"_q;
+	case State::Waiting: return u"waiting"_q;
+	case State::Joining: return u"joining"_q;
+	case State::Connecting: return u"connecting"_q;
+	case State::Joined: return u"joined"_q;
+	case State::FailedHangingUp:
+	case State::HangingUp: return u"hanging_up"_q;
+	case State::Failed: return u"failed"_q;
+	case State::Ended: return u"ended"_q;
+	}
+	return u"unknown"_q;
+}
+
+[[nodiscard]] QString MuteStateName(Calls::MuteState state) {
+	switch (state) {
+	case Calls::MuteState::Active: return u"unmuted"_q;
+	case Calls::MuteState::PushToTalk: return u"push_to_talk"_q;
+	case Calls::MuteState::Muted: return u"muted"_q;
+	case Calls::MuteState::ForceMuted: return u"muted_by_admin"_q;
+	case Calls::MuteState::RaisedHand: return u"raised_hand"_q;
+	}
+	return u"unknown"_q;
+}
+
+[[nodiscard]] QJsonObject DescribeGroupCallParticipant(
+		const MTPGroupCallParticipant &participant) {
+	const auto &d = participant.data();
+	auto result = QJsonObject();
+	result["peer_id"] = qint64(peerFromMTP(d.vpeer()).value);
+	result["muted"] = d.is_muted();
+	result["can_self_unmute"] = d.is_can_self_unmute();
+	result["self"] = d.is_self();
+	result["video"] = bool(d.vvideo());
+	result["screen_sharing"] = bool(d.vpresentation());
+	result["raised_hand"] = bool(d.vraise_hand_rating());
+	result["joined_date"] = qint64(d.vdate().v);
+	if (const auto active = d.vactive_date()) {
+		result["active_date"] = qint64(active->v);
+	}
+	if (const auto volume = d.vvolume()) {
+		// Telegram sends volume in hundredths of a percent.
+		result["volume_percent"] = volume->v / 100;
+	}
+	if (const auto about = d.vabout()) {
+		result["about"] = qs(*about);
+	}
+	return result;
+}
+
+} // namespace
+
+QJsonObject Server::toolGetActiveCall(const QJsonObject &args) {
+	Q_UNUSED(args);
+	if (!_session) {
+		return toolError("No active session");
+	}
+	auto value = QJsonObject();
+	value["success"] = true;
+	auto &calls = Core::App().calls();
+	if (const auto call = calls.currentCall()
+		; call && (&call->user()->session() == _session)) {
+		auto entry = QJsonObject();
+		entry["user_id"] = qint64(call->user()->id.value);
+		entry["name"] = call->user()->name();
+		entry["direction"] = (call->type() == Calls::CallType::Incoming)
+			? u"incoming"_q
+			: u"outgoing"_q;
+		entry["state"] = CallStateName(call->state());
+		entry["muted"] = call->muted();
+		entry["video"] = call->isSharingVideo();
+		entry["duration_seconds"] = qint64(call->getDurationMs() / 1000);
+		value["call"] = entry;
+	} else {
+		value["call"] = QJsonValue::Null;
+	}
+	if (const auto call = calls.currentGroupCall()
+		; call && (&call->peer()->session() == _session)) {
+		auto entry = QJsonObject();
+		entry["chat_id"] = qint64(call->peer()->id.value);
+		entry["chat_name"] = call->peer()->name();
+		if (const auto data = call->peer()->groupCall()) {
+			entry["title"] = data->title();
+			entry["participants_count"] = data->fullCount();
+		}
+		entry["state"] = GroupCallStateName(call->state());
+		entry["mute_state"] = MuteStateName(call->muted());
+		entry["rtmp_stream"] = call->rtmp();
+		if (const auto date = call->scheduleDate()) {
+			entry["schedule_date"] = qint64(date);
+		}
+		value["group_call"] = entry;
+	} else {
+		value["group_call"] = QJsonValue::Null;
+	}
+	return value;
+}
+
+QJsonObject Server::toolGetGroupCallInfo(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto data = peer ? peer->groupCall() : nullptr;
+	if (!data) {
+		return toolError(QString("Chat %1 has no voice or video chat that "
+			"this client knows of").arg(chatId));
+	}
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPphone_GetGroupCall(
+			data->input(),
+			MTP_int(0)
+		)).done([=](const MTPphone_GroupCall &result) {
+			const auto &r = result.data();
+			session->data().processUsers(r.vusers());
+			session->data().processChats(r.vchats());
+			auto value = QJsonObject();
+			r.vcall().match([&](const MTPDgroupCall &c) {
+				value["success"] = true;
+				value["chat_id"] = chatId;
+				value["title"] = c.vtitle() ? qs(*c.vtitle()) : QString();
+				value["participants_count"] = c.vparticipants_count().v;
+				value["join_muted"] = c.is_join_muted();
+				value["can_change_join_muted"] = c.is_can_change_join_muted();
+				value["rtmp_stream"] = c.is_rtmp_stream();
+				value["listeners_hidden"] = c.is_listeners_hidden();
+				value["recording"] = bool(c.vrecord_start_date());
+				value["recording_video"] = c.is_record_video_active();
+				value["can_start_video"] = c.is_can_start_video();
+				value["messages_enabled"] = c.is_messages_enabled();
+				if (const auto date = c.vschedule_date()) {
+					value["schedule_date"] = qint64(date->v);
+				}
+				if (const auto date = c.vrecord_start_date()) {
+					value["record_start_date"] = qint64(date->v);
+				}
+				if (const auto link = c.vinvite_link()) {
+					value["invite_link"] = qs(*link);
+				}
+			}, [&](const MTPDgroupCallDiscarded &) {
+				value = toolError("This voice chat has ended");
+			});
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetGroupCallParticipants(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto data = peer ? peer->groupCall() : nullptr;
+	if (!data) {
+		return toolError(QString("Chat %1 has no voice or video chat that "
+			"this client knows of").arg(chatId));
+	}
+	const auto limit = clampLimit(args.value("limit").toInt(100), 100, 500);
+	const auto offset = args.value("offset").toString();
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPphone_GetGroupParticipants(
+			data->input(),
+			MTP_vector<MTPInputPeer>(),
+			MTP_vector<MTPint>(),
+			MTP_string(offset),
+			MTP_int(limit)
+		)).done([=](const MTPphone_GroupParticipants &result) {
+			const auto &r = result.data();
+			session->data().processUsers(r.vusers());
+			session->data().processChats(r.vchats());
+			auto list = QJsonArray();
+			for (const auto &participant : r.vparticipants().v) {
+				auto entry = DescribeGroupCallParticipant(participant);
+				if (const auto p = session->data().peerLoaded(
+						PeerId(entry["peer_id"].toVariant().toLongLong()))) {
+					entry["name"] = p->name();
+				}
+				list.append(entry);
+			}
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["total"] = r.vcount().v;
+			value["participants"] = list;
+			value["count"] = list.size();
+			// Pass this back as offset for the next page; empty means the list is complete.
+			value["next_offset"] = qs(r.vnext_offset());
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolExportGroupCallInvite(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto data = peer ? peer->groupCall() : nullptr;
+	if (!data) {
+		return toolError(QString("Chat %1 has no voice or video chat that "
+			"this client knows of").arg(chatId));
+	}
+	const auto speaker = args.value("can_self_unmute").toBool(false);
+	using Flag = MTPphone_ExportGroupCallInvite::Flag;
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPphone_ExportGroupCallInvite(
+			MTP_flags(speaker ? Flag::f_can_self_unmute : Flag(0)),
+			data->input()
+		)).done([=](const MTPphone_ExportedGroupCallInvite &result) {
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["link"] = qs(result.data().vlink());
+			value["can_self_unmute"] = speaker;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolGetGroupCallRtmpUrl(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("No chat %1 in this client's data").arg(chatId));
+	}
+	// revoke issues a new stream key and breaks any encoder still using the old one.
+	const auto revoke = args.value("revoke").toBool(false);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPphone_GetGroupCallStreamRtmpUrl(
+			MTP_flags(0),
+			peer->input(),
+			MTP_bool(revoke)
+		)).done([=](const MTPphone_GroupCallStreamRtmpUrl &result) {
+			const auto &r = result.data();
+			auto value = QJsonObject();
+			value["success"] = true;
+			value["chat_id"] = chatId;
+			value["url"] = qs(r.vurl());
+			value["key"] = qs(r.vkey());
+			value["revoked"] = revoke;
+			done(value);
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
 	});
 }
 
