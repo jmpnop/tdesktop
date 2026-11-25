@@ -1,3 +1,8 @@
+7.4.4a (25.11.26)
+
+- Rebase onto Telegram Desktop 7.4.4.
+- Restore the Tlgrm app icon and fork version numbering.
+
 7.4.4 (13.11.26)
 
 - Bug fixes and other minor improvements.
@@ -83,6 +88,14 @@
 - Fix shared media and pinned messages in topics and Saved Messages.
 - Fix animated emoji effects autoplaying on already read messages.
 - Fix many crashes.
+
+7.2.9b (22.09.26)
+
+- Rotate the update signing key after the previous key was lost.
+
+7.2.9a (17.09.26)
+
+- Rebase onto Telegram Desktop 7.2.9 (tlottie rendering fixes).
 
 7.2.9 (16.09.26)
 
