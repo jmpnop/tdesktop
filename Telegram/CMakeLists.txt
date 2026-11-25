@@ -2856,6 +2856,7 @@ elseif (APPLE)
         target_add_resource(Telegram ${icons_path})
     else()
         set(icon_path ${icons_path}/Icon.iconset)
+        file(GLOB icon_sources CONFIGURE_DEPENDS ${icon_path}/*.png)
         find_program(ICONUTIL iconutil)
         find_program(PNG2ICNS png2icns)
         if (ICONUTIL)
@@ -2866,6 +2867,7 @@ elseif (APPLE)
                     --convert icns
                     --output Icon.icns
                     ${icon_path}
+                DEPENDS ${icon_sources}
             )
         elseif (PNG2ICNS)
             add_custom_command(
@@ -2878,6 +2880,7 @@ elseif (APPLE)
                     ${icon_path}/icon_128x128.png
                     ${icon_path}/icon_256x256.png
                     ${icon_path}/icon_512x512.png
+                DEPENDS ${icon_sources}
             )
         endif()
         if (ICONUTIL OR PNG2ICNS)
