@@ -873,6 +873,10 @@ void BotManager::shutdownBot(BotBase *bot) {
 	} catch (const std::exception &e) {
 		qCritical() << "[BotManager] Bot crashed during shutdown:" << botInfo.id << e.what();
 	}
+	// The bot is stopped whether or not onShutdown threw; without this,
+	// isRunning() stays true, stop_bot reports success while the bot still
+	// reads "running", and every later startBot is refused as already running.
+	bot->_isRunning = false;
 }
 
 void BotManager::updateStats(const QString &botId, qint64 executionTimeMs, bool error) {

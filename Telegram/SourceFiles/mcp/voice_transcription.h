@@ -101,7 +101,17 @@ private:
 	float estimateConfidence(const QString &text) const;
 
 	// Whisper.cpp helpers
-	QString executeWhisperCpp(const QString &audioPath, const QString &modelPath);
+	QString executeWhisperCpp(const QString &audioPath, const QString &modelPath, QString *error);
+	QString resolveWhisperModel() const;
+
+public:
+	// Where local tools and models are looked for. The app runs from
+	// /Applications with launchd's PATH, which lacks Homebrew, so bare
+	// names in QProcess fail; resolve absolute paths instead.
+	static QString findBinary(const QStringList &names);
+	static QString whisperModelDir();
+	static QString whisperBinary();
+private:
 
 	// Python subprocess helpers
 	QString executePythonWhisper(const QString &audioPath);
@@ -110,7 +120,9 @@ private:
 	QNetworkAccessManager *_networkManager = nullptr;
 
 	bool _isRunning = false;
-	TranscriptionProvider _provider = TranscriptionProvider::OpenAI;
+	// Local by default: whisper.cpp needs no account or key. OpenAI is used
+	// only when a caller selects it and supplies a key.
+	TranscriptionProvider _provider = TranscriptionProvider::WhisperCpp;
 	WhisperModelSize _modelSize = WhisperModelSize::Base;
 
 	QString _openaiApiKey;

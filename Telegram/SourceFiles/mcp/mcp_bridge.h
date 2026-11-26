@@ -79,7 +79,12 @@ private:
 	// Per-connection state
 	struct ConnectionState {
 		bool authenticated = false;
+		// Bytes received but not yet framed into a complete request.
+		QByteArray buffer;
 	};
+
+	// Parse and answer one framed request (a single JSON document).
+	void processRequest(QLocalSocket *socket, const QByteArray &data);
 	QHash<QLocalSocket*, ConnectionState> _connections;
 };
 

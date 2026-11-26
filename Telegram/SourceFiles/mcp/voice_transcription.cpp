@@ -6,6 +6,8 @@
 #include <QtCore/QProcess>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QDir>
+#include <QtCore/QDirIterator>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonArray>
 #include <QtCore/QRegularExpression>
@@ -54,7 +56,8 @@ TranscriptionResult VoiceTranscription::transcribe(const QString &audioFilePath)
 	TranscriptionResult result;
 	result.transcribedAt = startTime;
 
-	// Prepare audio file (convert if necessary)
+	// Prepare audio file (convert if necessary). whisper.cpp reads 16 kHz
+	// mono WAV; Telegram voice notes are Opus in Ogg, so convert them first.
 	QString preparedFile = prepareAudioFile(audioFilePath);
 	if (preparedFile.isEmpty()) {
 		result.success = false;
@@ -213,19 +216,24 @@ TranscriptionResult VoiceTranscription::transcribeWithWhisperCpp(const QString &
 	TranscriptionResult result;
 	result.success = false;
 
-	if (_whisperModelPath.isEmpty()) {
-		result.error = "Whisper model path not configured";
+	const auto modelPath = _whisperModelPath.isEmpty()
+		? resolveWhisperModel()
+		: _whisperModelPath;
+	if (modelPath.isEmpty()) {
+		result.error = QString("No whisper.cpp model found. Put a ggml model "
+			"(e.g. ggml-%1.bin from https://huggingface.co/ggerganov/whisper.cpp) in %2")
+			.arg(getModelName(_modelSize), whisperModelDir());
 		return result;
 	}
 
-	QString modelName = getModelName(_modelSize);
-	result.modelUsed = "whisper.cpp (" + modelName + ")";
+	result.modelUsed = "whisper.cpp (" + QFileInfo(modelPath).completeBaseName() + ")";
 
 	// Execute whisper.cpp
-	QString output = executeWhisperCpp(audioFilePath, _whisperModelPath);
+	QString execError;
+	QString output = executeWhisperCpp(audioFilePath, modelPath, &execError);
 
-	if (output.isEmpty()) {
-		result.error = "whisper.cpp execution failed";
+	if (output.trimmed().isEmpty()) {
+		result.error = execError.isEmpty() ? "whisper.cpp produced no text" : execError;
 		return result;
 	}
 
@@ -392,10 +400,12 @@ QString VoiceTranscription::prepareAudioFile(const QString &inputPath) {
 		return QString();
 	}
 
-	// Whisper accepts wav, mp3, ogg, flac, m4a directly
+	// The OpenAI API accepts common containers directly; whisper.cpp only
+	// reads WAV reliably (and never Opus), so everything else is converted.
 	static const QStringList directFormats = { "wav", "mp3", "ogg", "flac", "m4a", "webm" };
 	QString suffix = fileInfo.suffix().toLower();
-	if (directFormats.contains(suffix)) {
+	if (suffix == "wav"
+		|| (_provider == TranscriptionProvider::OpenAI && directFormats.contains(suffix))) {
 		return inputPath;
 	}
 
@@ -410,16 +420,20 @@ QString VoiceTranscription::prepareAudioFile(const QString &inputPath) {
 	     << "-y"               // overwrite
 	     << outputPath;
 
-	ffmpeg.start("ffmpeg", args);
+	const auto ffmpegBin = findBinary({ "ffmpeg" });
+	if (ffmpegBin.isEmpty()) {
+		qWarning() << "[VoiceTranscription] ffmpeg not found; cannot convert" << inputPath;
+		return _provider == TranscriptionProvider::OpenAI ? inputPath : QString();
+	}
+	ffmpeg.start(ffmpegBin, args);
 	ffmpeg.waitForFinished(30000); // 30s timeout
 
 	if (ffmpeg.exitStatus() == QProcess::NormalExit && ffmpeg.exitCode() == 0) {
 		return outputPath;
 	}
 
-	// FFmpeg not available or failed — try with original file anyway
-	qWarning() << "[VoiceTranscription] FFmpeg conversion failed, using original:" << inputPath;
-	return inputPath;
+	qWarning() << "[VoiceTranscription] FFmpeg conversion failed:" << inputPath;
+	return _provider == TranscriptionProvider::OpenAI ? inputPath : QString();
 }
 
 QString VoiceTranscription::getModelName(WhisperModelSize size) const {
@@ -467,22 +481,96 @@ float VoiceTranscription::estimateConfidence(const QString &text) const {
 }
 
 // Whisper.cpp helper
-QString VoiceTranscription::executeWhisperCpp(const QString &audioPath, const QString &modelPath) {
+QString VoiceTranscription::findBinary(const QStringList &names) {
+	const QStringList dirs = {
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		"/usr/bin",
+		QDir::homePath() + "/.local/bin",
+	};
+	for (const auto &name : names) {
+		for (const auto &dir : dirs) {
+			const auto path = dir + '/' + name;
+			if (QFileInfo(path).isExecutable()) {
+				return path;
+			}
+		}
+	}
+	return QString();
+}
+
+QString VoiceTranscription::whisperBinary() {
+	// Homebrew's whisper-cpp ships whisper-cli; older builds named it main.
+	return findBinary({ "whisper-cli", "whisper-cpp", "whisper" });
+}
+
+QString VoiceTranscription::whisperModelDir() {
+	return QDir::homePath() + "/Library/Application Support/Tlgrm/whisper";
+}
+
+QString VoiceTranscription::resolveWhisperModel() const {
+	const auto size = getModelName(_modelSize);
+	const QStringList dirs = {
+		whisperModelDir(),
+		"/opt/homebrew/share/whisper-cpp",
+		"/usr/local/share/whisper-cpp",
+	};
+	// Prefer the configured size, then any multilingual model, then any.
+	const QStringList patterns = {
+		"ggml-" + size + ".bin",
+		"ggml-" + size + "*.bin",
+		"ggml-*.bin",
+	};
+	for (const auto &pattern : patterns) {
+		for (const auto &dir : dirs) {
+			const auto found = QDir(dir).entryInfoList(
+				{ pattern }, QDir::Files, QDir::Name);
+			for (const auto &info : found) {
+				// Skip the tiny test fixtures some packages ship.
+				if (info.size() > 10 * 1024 * 1024) {
+					return info.absoluteFilePath();
+				}
+			}
+		}
+	}
+	return QString();
+}
+
+QString VoiceTranscription::executeWhisperCpp(
+		const QString &audioPath,
+		const QString &modelPath,
+		QString *error) {
+	const auto bin = whisperBinary();
+	if (bin.isEmpty()) {
+		if (error) {
+			*error = "whisper.cpp not found. Install via: brew install whisper-cpp";
+		}
+		return QString();
+	}
+
 	QProcess process;
 
 	QStringList args;
 	args << "-m" << modelPath;
 	args << "-f" << audioPath;
-	args << "--output-txt";
+	args << "-nt";  // plain text, no timestamps
+	args << "-np";  // no progress / system info on stdout
+	args << "-l" << (_language.isEmpty() ? QString("auto") : _language);
 
-	if (!_language.isEmpty()) {
-		args << "-l" << _language;
+	process.start(bin, args);
+	if (!process.waitForFinished(120000)) {
+		process.kill();
+		if (error) {
+			*error = "whisper.cpp timed out";
+		}
+		return QString();
 	}
 
-	process.start("whisper", args);
-	process.waitForFinished(60000);  // 60 second timeout
-
-	if (process.exitStatus() != QProcess::NormalExit) {
+	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+		if (error) {
+			*error = "whisper.cpp failed: "
+				+ QString::fromUtf8(process.readAllStandardError()).trimmed().right(400);
+		}
 		return QString();
 	}
 

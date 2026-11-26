@@ -124,9 +124,17 @@ bool BotBase::hasPermission(const QString &permission) const {
 		return false;
 	}
 
+	// RBAC holds API keys for external MCP callers. A bot is in-process code
+	// and normally has no key, so asking RBAC about it always answered "API
+	// key not found": every gated bot action was denied, and a bot could not
+	// be restarted once onInitialize had declared its permissions. A bot is
+	// granted what it declared; an explicit RBAC key for the bot id, when an
+	// operator creates one, still takes precedence.
 	auto botInfo = info();
-	auto result = _rbac->checkPermission(botInfo.id, it.value());
-	return result.granted;
+	if (!_rbac->getAPIKey(botInfo.id).keyHash.isEmpty()) {
+		return _rbac->checkPermission(botInfo.id, it.value()).granted;
+	}
+	return _requiredPermissions.contains(permission);
 }
 
 void BotBase::addRequiredPermission(const QString &permission) {

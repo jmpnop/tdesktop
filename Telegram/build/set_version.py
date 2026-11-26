@@ -143,8 +143,8 @@ print('Patching build/version...')
 replaceInFile(scriptPath + '/version', [
   [ r'(AppVersion\s+)\d+', r'\g<1>' + versionFull ],
   [ r'(AppVersionStrMajor\s+)\d[\d\.]*', r'\g<1>' + versionMajor + '.' + versionMinor ],
-  [ r'(AppVersionStrSmall\s+)\d[\d\.]*', r'\g<1>' + versionStrSmall ],
-  [ r'(AppVersionStr\s+)\d[\d\.]*', r'\g<1>' + versionStr ],
+  [ r'(AppVersionStrSmall\s+)\d[\d\.]*[a-z]*', r'\g<1>' + versionStrSmall ],
+  [ r'(AppVersionStr\s+)\d[\d\.]*[a-z]*', r'\g<1>' + versionStr ],
   [ r'(BetaChannel\s+)\d', r'\g<1>' + ('1' if versionBeta else '0') ],
   [ r'(AlphaVersion\s+)\d+', r'\g<1>' + versionFullAlpha ],
   [ r'(AppVersionOriginal\s+)\d[\d\.beta]*', r'\g<1>' + versionOriginal ],

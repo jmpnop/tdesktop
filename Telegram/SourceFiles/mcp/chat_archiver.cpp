@@ -621,14 +621,25 @@ QJsonArray ChatArchiver::searchMessages(qint64 chatId, const QString &query, int
 	QJsonArray result;
 
 	QSqlQuery sqlQuery(_db);
-	sqlQuery.prepare(R"(
+	// chat_id <= 0 (absent in the tool call) searches every archived chat.
+	const bool allChats = (chatId <= 0);
+	sqlQuery.prepare(allChats
+		? QString(R"(
+		SELECT * FROM messages
+		WHERE content LIKE :query
+		ORDER BY timestamp DESC
+		LIMIT :limit
+	)")
+		: QString(R"(
 		SELECT * FROM messages
 		WHERE chat_id = :chat_id
 		AND content LIKE :query
 		ORDER BY timestamp DESC
 		LIMIT :limit
-	)");
-	sqlQuery.bindValue(":chat_id", chatId);
+	)"));
+	if (!allChats) {
+		sqlQuery.bindValue(":chat_id", chatId);
+	}
 	sqlQuery.bindValue(":query", "%" + query + "%");
 	sqlQuery.bindValue(":limit", limit);
 

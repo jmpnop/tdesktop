@@ -16,6 +16,7 @@
 #include <QtCore/QDebug>
 #include <QtCore/QUuid>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QPointer>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -228,12 +229,58 @@ void Bridge::onNewConnection() {
 
 void Bridge::onReadyRead() {
 	QLocalSocket *socket = qobject_cast<QLocalSocket*>(sender());
-	if (!socket) {
+	if (!socket || !_connections.contains(socket)) {
 		return;
 	}
 
-	// Read all available data
-	QByteArray data = socket->readAll();
+	// The protocol is newline-delimited JSON. A read is not a message: a
+	// client may split one request over several writes (or send its newline
+	// separately), or batch several requests into one. Buffer per connection
+	// and answer each complete line.
+	constexpr auto kMaxPending = 64 * 1024 * 1024;
+	QPointer<QLocalSocket> guard(socket);
+	_connections[socket].buffer.append(socket->readAll());
+
+	for (;;) {
+		if (!guard || !_connections.contains(socket)) {
+			return;
+		}
+		auto &buffer = _connections[socket].buffer;
+		const auto newline = buffer.indexOf('\n');
+		QByteArray line;
+		if (newline >= 0) {
+			line = buffer.left(newline);
+			buffer.remove(0, newline + 1);
+		} else {
+			if (buffer.trimmed().isEmpty()) {
+				buffer.clear();
+				return;
+			}
+			// Compatibility: clients that send one document per write with no
+			// trailing newline. Answer it once it parses as a whole document.
+			QJsonParseError probe;
+			QJsonDocument::fromJson(buffer, &probe);
+			if (probe.error != QJsonParseError::NoError) {
+				if (buffer.size() > kMaxPending) {
+					qWarning() << "MCP Bridge: request exceeds"
+						<< kMaxPending << "bytes, dropping connection";
+					buffer.clear();
+					socket->disconnectFromServer();
+				}
+				return; // wait for the rest
+			}
+			line = buffer;
+			buffer.clear();
+		}
+		if (line.trimmed().isEmpty()) {
+			continue; // a bare newline is framing, not a request
+		}
+		processRequest(socket, line);
+	}
+}
+
+void Bridge::processRequest(QLocalSocket *socket, const QByteArray &data) {
+	QPointer<QLocalSocket> guard(socket);
 
 	// Parse JSON-RPC request
 	QJsonParseError parseError;
@@ -250,8 +297,9 @@ void Bridge::onReadyRead() {
 		errObj["message"] = QStringLiteral("Parse error");
 		error["error"] = errObj;
 
-		socket->write(QJsonDocument(error).toJson(QJsonDocument::Compact));
-		socket->write("\n");
+		QByteArray out = QJsonDocument(error).toJson(QJsonDocument::Compact);
+		out.append('\n');
+		socket->write(out);
 		socket->flush();
 		return;
 	}
@@ -261,10 +309,14 @@ void Bridge::onReadyRead() {
 
 	// Handle command (with per-connection auth state)
 	QJsonObject response = handleCommand(request, socket);
+	if (!guard) {
+		return; // the client went away while the tool ran
+	}
 
-	// Send response
-	socket->write(QJsonDocument(response).toJson(QJsonDocument::Compact));
-	socket->write("\n");
+	// Send response as one write, newline included.
+	QByteArray out = QJsonDocument(response).toJson(QJsonDocument::Compact);
+	out.append('\n');
+	socket->write(out);
 	socket->flush();
 }
 
