@@ -1,3 +1,10 @@
+7.4.4b (26.11.26)
+
+- Stopping a bot now really stops it, so it can be started again.
+- Archive search without a chat searches every archived chat.
+- Voice transcription runs locally with whisper.cpp by default.
+- The MCP bridge reads requests by line, however a client splits its writes.
+
 7.4.4a (25.11.26)
 
 - Rebase onto Telegram Desktop 7.4.4.
