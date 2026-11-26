@@ -1062,9 +1062,11 @@ void Filler::addDirectMessages() {
 }
 
 void Filler::addExportChat() {
-	if (!_peer->canExportChatHistory()) {
-		return;
-	}
+/*	
+	if (!_peer->canExportChatHistory()) {   // directive 1337
+		return;				// directive 1337
+	}					// directive 1337
+*/
 	const auto peer = _peer;
 	const auto navigation = _controller;
 	if (const auto topic = _thread->asTopic()) {
