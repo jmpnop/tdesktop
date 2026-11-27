@@ -500,6 +500,8 @@ QJsonObject Server::toolListMarketplace(const QJsonObject &args) {
 	const auto sortBy = args.value("sort_by").toString("price");
 	const auto offset = args.value("offset").toString();
 	const auto limit = args.value("limit").toInt(50);
+	const auto currency = args.value("currency").toString();
+	const auto fragmentOnly = args.value("fragment_only").toBool();
 
 	if (!giftId) {
 		result["error"] = "Missing gift_id parameter";
@@ -519,10 +521,13 @@ QJsonObject Server::toolListMarketplace(const QJsonObject &args) {
 		: (sortBy == "num")
 		? Flag::f_sort_by_num
 		: Flag();
+	const auto filters = ((currency == "stars") ? Flag::f_stars_only : Flag())
+		| ((currency == "ton") ? Flag::f_ton_only : Flag())
+		| (fragmentOnly ? Flag::f_fragment_only : Flag());
 
 	return awaitMtp([&](auto done, auto fail) {
 		_session->api().request(MTPpayments_GetResaleStarGifts(
-			MTP_flags(flags),
+			MTP_flags(flags | filters),
 			MTPlong(), // attributes_hash: nothing cached
 			MTP_long(giftId),
 			MTPVector<MTPStarGiftAttributeId>(), // no attribute filter
@@ -547,6 +552,12 @@ QJsonObject Server::toolListMarketplace(const QJsonObject &args) {
 							prices.append(StarsAmountJson(amount));
 						}
 						obj["resell_amount"] = prices;
+					}
+					obj["resale_ton_only"] = gift.is_resale_ton_only();
+					obj["onchain_sale"] = gift.is_onchain_sale();
+					obj["fixed_sale"] = gift.is_fixed_sale();
+					if (const auto address = gift.vgift_address()) {
+						obj["gift_address"] = qs(*address);
 					}
 				}, [&](const MTPDstarGift &gift) {
 					obj["gift_id"] = qint64(gift.vid().v);

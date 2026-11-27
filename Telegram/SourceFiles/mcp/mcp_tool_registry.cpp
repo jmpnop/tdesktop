@@ -3982,6 +3982,8 @@ void Server::registerTools() {
 					{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift type whose resale listings to browse."}}},
 					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}}},
 					{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
+					{"currency", QJsonObject{{"type", "string"}, {"enum", QJsonArray{"stars", "ton"}}, {"description", "Only copies priced in this currency; omit for both."}}},
+					{"fragment_only", QJsonObject{{"type", "boolean"}, {"description", "Only copies listed on Fragment (on-chain)."}, {"default", false}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}}
 				}},
 				{"required", QJsonArray{"gift_id"}}
@@ -4253,7 +4255,7 @@ void Server::registerTools() {
 		},
 		Tool{
 			"get_fragment_listings",
-			"Browse the copies of one star gift currently offered for resale. Alias for list_marketplace -- these are Telegram's own resale listings, not Fragment's.",
+			"Browse the copies of one star gift currently offered for resale. Alias for list_marketplace; pass fragment_only: true for copies listed on Fragment.",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
@@ -4261,6 +4263,8 @@ void Server::registerTools() {
 					{"limit", QJsonObject{{"type", "integer"}, {"default", 50}, {"description", "Maximum number of results to return."}}},
 					{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
 					{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}}},
+					{"currency", QJsonObject{{"type", "string"}, {"enum", QJsonArray{"stars", "ton"}}, {"description", "Only copies priced in this currency; omit for both."}}},
+					{"fragment_only", QJsonObject{{"type", "boolean"}, {"description", "Only copies listed on Fragment (on-chain)."}, {"default", false}}},
 				}},
 				{"required", QJsonArray{"gift_id"}}
 			}
@@ -4878,6 +4882,8 @@ void Server::registerTools() {
 			{"gift_id", QJsonObject{{"type", "integer"}, {"description", "Gift type whose resale listings to browse."}}},
 			{"sort_by", QJsonObject{{"type", "string"}, {"description", "Order results by asking price (\"price\") or issue number (\"num\"); anything else leaves Telegram's default order."}, {"default", "price"}}},
 			{"offset", QJsonObject{{"type", "string"}, {"description", "Opaque paging cursor from a previous call's next_offset; omit for the first page."}}},
+			{"currency", QJsonObject{{"type", "string"}, {"enum", QJsonArray{"stars", "ton"}}, {"description", "Only copies priced in this currency; omit for both."}}},
+			{"fragment_only", QJsonObject{{"type", "boolean"}, {"description", "Only copies listed on Fragment (on-chain)."}, {"default", false}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 50)."}}},
 				}}, {"required", QJsonArray{"gift_id"}}}},
 		Tool{"buy_gift", "Buy a resold star gift. NOT IMPLEMENTED: this spends stars through the payment-form flow, and nothing is recorded locally, so it always reports failure.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
@@ -5264,6 +5270,7 @@ void Server::registerTools() {
 			{"message_id", QJsonObject{{"type", "integer"}, {"description", "The rich message"}}},
 			{"path", QJsonObject{{"type", "string"}, {"description", "Directory to write into; defaults to the export directory"}}}
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
+
 
 		// FORUM TOPIC TOOLS
 		Tool{"list_topics", "List a forum's topics with their unread counts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
