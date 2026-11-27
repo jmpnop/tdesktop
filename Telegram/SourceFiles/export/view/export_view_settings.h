@@ -87,8 +87,6 @@ private:
 		not_null<Ui::Checkbox*> above);
 	void addLocationLabel(
 		not_null<Ui::VerticalLayout*> container);
-	void addFormatAndLocationLabel(
-		not_null<Ui::VerticalLayout*> container);
 	void addSinglePeerFormatLabel(
 		not_null<Ui::VerticalLayout*> container);
 	void addSinglePeerPathLabel(
@@ -100,7 +98,6 @@ private:
 	void addResumeFromLabel(
 		not_null<Ui::VerticalLayout*> container);
 	void chooseFolder();
-	void chooseFormat();
 	void refreshButtons(
 		not_null<Ui::RpWidget*> container,
 		bool canStart);
