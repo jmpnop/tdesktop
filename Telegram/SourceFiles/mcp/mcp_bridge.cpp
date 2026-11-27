@@ -25,7 +25,7 @@
 #include <unistd.h>
 
 // macOS peer credentials
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 #include <sys/ucred.h>
 #endif
 
@@ -166,7 +166,7 @@ void Bridge::setServer(Server *server) {
 }
 
 bool Bridge::verifyPeerCredentials(QLocalSocket *socket) {
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 	// Verify connecting process runs as same user (macOS)
 	const auto fd = socket->socketDescriptor();
 	if (fd < 0) {
