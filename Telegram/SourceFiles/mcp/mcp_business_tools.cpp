@@ -1324,6 +1324,7 @@ QJsonObject Server::toolSendVoiceReply(const QJsonObject &args) {
 		waveform,
 		durationMs,
 		false,
+		nullptr, // no video source
 		action);
 
 	result["success"] = true;
@@ -1495,6 +1496,7 @@ QJsonObject Server::toolSendVideoReply(const QJsonObject &args) {
 		waveform,               // VoiceWaveform
 		crl::time(durationMs),  // duration in ms
 		true,                   // video = true (round video note!)
+		nullptr,                // already encoded, no video source
 		action);
 
 	result["success"] = true;
