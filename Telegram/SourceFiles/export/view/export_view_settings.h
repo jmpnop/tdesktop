@@ -87,6 +87,7 @@ private:
 		not_null<Ui::Checkbox*> above);
 	void addLocationLabel(
 		not_null<Ui::VerticalLayout*> container);
+	void chooseFormat();
 	void addSinglePeerFormatLabel(
 		not_null<Ui::VerticalLayout*> container);
 	void addSinglePeerPathLabel(
