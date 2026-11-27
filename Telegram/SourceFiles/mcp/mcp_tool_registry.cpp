@@ -5273,9 +5273,12 @@ void Server::registerTools() {
 
 
 		// FORUM TOPIC TOOLS
-		Tool{"list_topics", "List a forum's topics with their unread counts", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		Tool{"list_topics", "List a forum's topics with their unread counts. Passing query, icon_emoji_id or closed searches the server instead of the loaded list.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The forum supergroup"}}},
-			{"unread_only", QJsonObject{{"type", "boolean"}, {"description", "Return only topics with something unread"}, {"default", false}}},
+			{"unread_only", QJsonObject{{"type", "boolean"}, {"description", "Return only topics with something unread (local list only)"}, {"default", false}}},
+			{"query", QJsonObject{{"type", "string"}, {"description", "Search topic titles on the server"}}},
+			{"icon_emoji_id", QJsonObject{{"type", "string"}, {"description", "Only topics with this custom emoji icon (server filter)"}}},
+			{"closed", QJsonObject{{"type", "boolean"}, {"description", "Only closed (true) or open (false) topics (server filter)"}}},
 			{"limit", QJsonObject{{"type", "integer"}, {"description", "How many topics to return"}, {"default", 100}}}
 		}}, {"required", QJsonArray{"chat_id"}}}},
 

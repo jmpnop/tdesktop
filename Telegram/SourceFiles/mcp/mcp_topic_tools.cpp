@@ -32,6 +32,11 @@ QJsonObject Server::toolListTopics(const QJsonObject &args) {
 	}
 	const auto unreadOnly = args.value("unread_only").toBool(false);
 	const auto limit = clampLimit(args.value("limit").toInt(100), 100, 500);
+	if (args.contains("query")
+		|| args.contains("icon_emoji_id")
+		|| args.contains("closed")) {
+		return searchForumTopics(channel, args, limit);
+	}
 
 	auto items = QJsonArray();
 	auto total = 0;
@@ -71,6 +76,68 @@ QJsonObject Server::toolListTopics(const QJsonObject &args) {
 	value["topics_with_unread"] = unreadTotal;
 	value["topics"] = items;
 	return value;
+}
+
+// The filters need messages.getForumTopics; the local list has no title search.
+QJsonObject Server::searchForumTopics(
+		not_null<ChannelData*> channel,
+		const QJsonObject &args,
+		int limit) {
+	using Flag = MTPmessages_GetForumTopics::Flag;
+	const auto query = args.value("query").toString();
+	const auto emojiId = args.value("icon_emoji_id").toVariant().toLongLong();
+	const auto hasClosed = args.contains("closed");
+	const auto flags = (query.isEmpty() ? Flag() : Flag::f_q)
+		| (args.contains("icon_emoji_id") ? Flag::f_icon_emoji_id : Flag())
+		| (hasClosed ? Flag::f_closed : Flag());
+	const auto session = _session;
+	const auto chatId = qint64(channel->id.value);
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_GetForumTopics(
+			MTP_flags(flags),
+			channel->input(),
+			MTP_string(query),
+			MTP_long(emojiId),
+			MTP_bool(args.value("closed").toBool()),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_int(0),
+			MTP_int(limit)
+		)).done([=](const MTPmessages_ForumTopics &result) {
+			const auto &data = result.data();
+			auto items = QJsonArray();
+			for (const auto &topic : data.vtopics().v) {
+				topic.match([&](const MTPDforumTopic &fields) {
+					auto entry = QJsonObject();
+					entry["topic_id"] = fields.vid().v;
+					entry["title"] = qs(fields.vtitle());
+					entry["closed"] = fields.is_closed();
+					entry["pinned"] = fields.is_pinned();
+					entry["hidden"] = fields.is_hidden();
+					entry["icon_color"] = fields.vicon_color().v;
+					if (const auto emoji = fields.vicon_emoji_id()) {
+						entry["icon_emoji_id"] = QString::number(emoji->v);
+					}
+					entry["unread_count"] = fields.vunread_count().v;
+					entry["unread_mentions"] = fields.vunread_mentions_count().v;
+					entry["unread_reactions"] = fields.vunread_reactions_count().v;
+					entry["top_message"] = fields.vtop_message().v;
+					items.append(entry);
+				}, [](const MTPDforumTopicDeleted &) {
+				});
+			}
+			done(QJsonObject{
+				{ "success", true },
+				{ "chat_id", chatId },
+				{ "source", "server" },
+				{ "count", items.size() },
+				{ "topics_total", data.vcount().v },
+				{ "topics", items },
+			});
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 // Wave 7 - forum topic create/edit/pin/delete (real MTP).
