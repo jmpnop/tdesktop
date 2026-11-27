@@ -328,6 +328,12 @@ private:
 	QJsonObject toolInviteUsersToBot(const QJsonObject &args);
 	QJsonObject toolSetChatAiStyle(const QJsonObject &args);
 	QJsonObject toolGetMessageWidget(const QJsonObject &args);
+	QJsonObject toolPostStory(const QJsonObject &args);
+	QJsonObject toolListStoryUploads(const QJsonObject &args);
+	QJsonObject toolCancelStoryUpload(const QJsonObject &args);
+	QJsonObject toolListStoryDrafts(const QJsonObject &args);
+	QJsonObject toolSaveStoryDraft(const QJsonObject &args);
+	QJsonObject toolDeleteStoryDraft(const QJsonObject &args);
 	QJsonObject withdrawEarningsToWallet(const QJsonObject &args);
 	QJsonObject searchForumTopics(
 		not_null<ChannelData*> channel,

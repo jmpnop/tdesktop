@@ -1615,6 +1615,12 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["set_chat_ai_style"] = [this](const QJsonObject &args) { return toolSetChatAiStyle(args); };
 	_toolHandlers["get_message_widget"] = [this](const QJsonObject &args) { return toolGetMessageWidget(args); };
 	_toolHandlers["mark_transaction_spam"] = [this](const QJsonObject &args) { return toolMarkTransactionSpam(args); };
+	_toolHandlers["post_story"] = [this](const QJsonObject &args) { return toolPostStory(args); };
+	_toolHandlers["list_story_uploads"] = [this](const QJsonObject &args) { return toolListStoryUploads(args); };
+	_toolHandlers["cancel_story_upload"] = [this](const QJsonObject &args) { return toolCancelStoryUpload(args); };
+	_toolHandlers["list_story_drafts"] = [this](const QJsonObject &args) { return toolListStoryDrafts(args); };
+	_toolHandlers["save_story_draft"] = [this](const QJsonObject &args) { return toolSaveStoryDraft(args); };
+	_toolHandlers["delete_story_draft"] = [this](const QJsonObject &args) { return toolDeleteStoryDraft(args); };
 
 	// VOICE TOOLS
 	_toolHandlers["transcribe_voice"] = [this](const QJsonObject &args) { return toolTranscribeVoice(args); };

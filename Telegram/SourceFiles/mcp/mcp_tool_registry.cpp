@@ -5311,6 +5311,35 @@ void Server::registerTools() {
 			{"transaction_id", QJsonObject{{"type", "string"}, {"description", "Transaction id from manage_wallet get_history"}}},
 			{"spam", QJsonObject{{"type", "boolean"}, {"description", "true to mark, false to unmark"}, {"default", true}}}
 		}}, {"required", QJsonArray{"transaction_id"}}}},
+		Tool{"post_story", "Post a photo or video story from a local file, with caption, privacy, lifetime, pinning and an optional music track. A file that already fits the story format is sent as is; anything else is fitted on a 9:16 canvas and transcoded. Music turns a photo into a video story and replaces a video's own sound. Returns an upload_id to follow with list_story_uploads.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"file_path", QJsonObject{{"type", "string"}, {"description", "Local photo or video file"}}},
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "Channel to post to; omit for your own profile"}}},
+			{"caption", QJsonObject{{"type", "string"}, {"description", "Plain-text caption"}}},
+			{"privacy", QJsonObject{{"type", "string"}, {"description", "everyone, contacts, close_friends or selected"}, {"default", "everyone"}}},
+			{"allow_user_ids", QJsonObject{{"type", "array"}, {"description", "Users who can see it (required for selected)"}, {"items", QJsonObject{{"type", "integer"}}}}},
+			{"disallow_user_ids", QJsonObject{{"type", "array"}, {"description", "Users who cannot see it"}, {"items", QJsonObject{{"type", "integer"}}}}},
+			{"period_hours", QJsonObject{{"type", "integer"}, {"description", "Lifetime: 6, 12, 24 or 48 hours"}, {"default", 24}}},
+			{"pinned", QJsonObject{{"type", "boolean"}, {"description", "Keep it on the profile after it expires"}, {"default", true}}},
+			{"protect_content", QJsonObject{{"type", "boolean"}, {"description", "Disallow forwarding and saving"}, {"default", false}}},
+			{"music_path", QJsonObject{{"type", "string"}, {"description", "Local audio file to attach"}}},
+			{"music_title", QJsonObject{{"type", "string"}, {"description", "Track title; defaults to the file name"}}},
+			{"music_performer", QJsonObject{{"type", "string"}, {"description", "Track performer"}}}
+		}}, {"required", QJsonArray{"file_path"}}}},
+		Tool{"list_story_uploads", "List stories that are still preparing or uploading, with progress and any error.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		}}}},
+		Tool{"cancel_story_upload", "Cancel a story that is still preparing or uploading.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"upload_id", QJsonObject{{"type", "string"}, {"description", "upload_id from post_story or list_story_uploads"}}}
+		}}, {"required", QJsonArray{"upload_id"}}}},
+		Tool{"list_story_drafts", "List story drafts saved on this device (kept for 7 days).", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+		}}}},
+		Tool{"save_story_draft", "Save a photo or video with a caption as a story draft on this device, to finish and post from the app. Drafts do not store privacy or pinning.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"file_path", QJsonObject{{"type", "string"}, {"description", "Local photo or video file"}}},
+			{"caption", QJsonObject{{"type", "string"}, {"description", "Plain-text caption"}}},
+			{"period_hours", QJsonObject{{"type", "integer"}, {"description", "Lifetime to preselect: 6, 12, 24 or 48 hours"}, {"default", 24}}}
+		}}, {"required", QJsonArray{"file_path"}}}},
+		Tool{"delete_story_draft", "Delete a story draft saved on this device.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"draft_id", QJsonObject{{"type", "string"}, {"description", "draft_id from list_story_drafts"}}}
+		}}, {"required", QJsonArray{"draft_id"}}}},
 
 		// FORUM TOPIC TOOLS
 		Tool{"list_topics", "List a forum's topics with their unread counts. Passing query, icon_emoji_id or closed searches the server instead of the loaded list.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
