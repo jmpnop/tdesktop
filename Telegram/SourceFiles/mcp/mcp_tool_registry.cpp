@@ -5307,6 +5307,10 @@ void Server::registerTools() {
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The chat"}}},
 			{"message_id", QJsonObject{{"type", "integer"}, {"description", "The message with the widget"}}}
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
+		Tool{"mark_transaction_spam", "Mark or unmark a TON wallet transaction as spam in this client's database. Telegram has no API to report a wallet transaction, so the mark is local; manage_wallet get_history shows it as marked_spam_locally next to the server's suspected_spam.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"transaction_id", QJsonObject{{"type", "string"}, {"description", "Transaction id from manage_wallet get_history"}}},
+			{"spam", QJsonObject{{"type", "boolean"}, {"description", "true to mark, false to unmark"}, {"default", true}}}
+		}}, {"required", QJsonArray{"transaction_id"}}}},
 
 		// FORUM TOPIC TOOLS
 		Tool{"list_topics", "List a forum's topics with their unread counts. Passing query, icon_emoji_id or closed searches the server instead of the loaded list.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

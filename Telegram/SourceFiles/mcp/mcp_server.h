@@ -548,6 +548,7 @@ private:
 	QJsonObject toolGetStarRating(const QJsonObject &args);
 	QJsonObject toolGetWithdrawalStatus(const QJsonObject &args);
 	QJsonObject toolCreateCryptoPayment(const QJsonObject &args);
+	QJsonObject toolMarkTransactionSpam(const QJsonObject &args);
 
 	// Budget & Reporting - 5 tools
 	QJsonObject toolSetWalletBudget(const QJsonObject &args);

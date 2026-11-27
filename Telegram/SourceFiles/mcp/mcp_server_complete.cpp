@@ -276,6 +276,7 @@ bool Server::start(TransportType transport) {
 		q.exec("CREATE TABLE IF NOT EXISTS bot_configs (bot_id TEXT PRIMARY KEY, config_json TEXT, updated_at INTEGER)");
 		q.exec("CREATE TABLE IF NOT EXISTS wallet_budgets (id INTEGER PRIMARY KEY, balance REAL DEFAULT 0, daily_limit REAL, weekly_limit REAL, monthly_limit REAL, last_updated TEXT, updated_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS wallet_spending (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, amount REAL, category TEXT, description TEXT, peer_id INTEGER)");
+		q.exec("CREATE TABLE IF NOT EXISTS wallet_spam_marks (transaction_id TEXT PRIMARY KEY, marked_at INTEGER NOT NULL)");
 		q.exec("CREATE TABLE IF NOT EXISTS miniapp_budgets (miniapp_id TEXT PRIMARY KEY, approved_amount REAL, spent_amount REAL DEFAULT 0, created_at TEXT)");
 		q.exec("CREATE TABLE IF NOT EXISTS portfolio (gift_type TEXT PRIMARY KEY, quantity INTEGER DEFAULT 0, avg_price REAL DEFAULT 0, current_value REAL DEFAULT 0)");
 		q.exec("CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, gift_type TEXT, date TEXT, price REAL)");
@@ -1613,6 +1614,7 @@ void Server::initializeToolHandlers() {
 	_toolHandlers["invite_users_to_bot"] = [this](const QJsonObject &args) { return toolInviteUsersToBot(args); };
 	_toolHandlers["set_chat_ai_style"] = [this](const QJsonObject &args) { return toolSetChatAiStyle(args); };
 	_toolHandlers["get_message_widget"] = [this](const QJsonObject &args) { return toolGetMessageWidget(args); };
+	_toolHandlers["mark_transaction_spam"] = [this](const QJsonObject &args) { return toolMarkTransactionSpam(args); };
 
 	// VOICE TOOLS
 	_toolHandlers["transcribe_voice"] = [this](const QJsonObject &args) { return toolTranscribeVoice(args); };

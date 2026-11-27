@@ -10,6 +10,7 @@
 #include "data/business/data_business_chatbots.h"
 #include "data/business/data_business_common.h"
 #include "wallet/wallet_session.h"
+#include "base/unixtime.h"
 
 namespace MCP {
 // ============================================================================
@@ -1284,6 +1285,70 @@ QJsonObject Server::toolGetWithdrawalStatus(const QJsonObject &args) {
 	return result;
 }
 
+namespace {
+
+[[nodiscard]] QString WalletKindName(Wallet::TransferItem::Kind kind) {
+	using Kind = Wallet::TransferItem::Kind;
+	switch (kind) {
+	case Kind::Transfer: return "transfer";
+	case Kind::Collectible: return "collectible";
+	case Kind::Onramp: return "onramp";
+	case Kind::PeerTransfer: return "peer_transfer";
+	case Kind::KeyChange: return "key_change";
+	}
+	return "transfer";
+}
+
+[[nodiscard]] QString OnchainGiftActionName(Wallet::TransferOnchainGift action) {
+	using Action = Wallet::TransferOnchainGift;
+	switch (action) {
+	case Action::None: return "none";
+	case Action::Buy: return "buy";
+	case Action::List: return "list";
+	case Action::Delist: return "delist";
+	case Action::Reprice: return "reprice";
+	case Action::OfferCreate: return "offer_create";
+	case Action::OfferAcceptBuyer: return "offer_accept_buyer";
+	case Action::OfferAcceptSeller: return "offer_accept_seller";
+	case Action::OfferCancel: return "offer_cancel";
+	case Action::OfferDecline: return "offer_decline";
+	case Action::OfferExpire: return "offer_expire";
+	}
+	return "none";
+}
+
+} // namespace
+
+// Telegram has no call to report a wallet transaction, so the mark stays in this server's database.
+QJsonObject Server::toolMarkTransactionSpam(const QJsonObject &args) {
+	const auto id = args.value("transaction_id").toString().trimmed();
+	if (id.isEmpty()) {
+		return toolError("transaction_id is required (from get_history)");
+	}
+	const auto spam = args.value("spam").toBool(true);
+	QSqlQuery query(_db);
+	if (spam) {
+		query.prepare("INSERT OR REPLACE INTO wallet_spam_marks "
+			"(transaction_id, marked_at) VALUES (?, ?)");
+		query.addBindValue(id);
+		query.addBindValue(qint64(base::unixtime::now()));
+	} else {
+		query.prepare("DELETE FROM wallet_spam_marks WHERE transaction_id = ?");
+		query.addBindValue(id);
+	}
+	if (!query.exec()) {
+		return toolError(query.lastError().text());
+	}
+	return QJsonObject{
+		{ "success", true },
+		{ "transaction_id", id },
+		{ "marked_spam_locally", spam },
+		{ "scope", "local" },
+		{ "note", "Saved in this client only; Telegram has no API to report "
+			"a wallet transaction." },
+	};
+}
+
 QJsonObject Server::toolCreateCryptoPayment(const QJsonObject &args) {
 	const auto amount = args["amount"].toDouble();
 	const auto currency = args.value("currency").toString("TON");
@@ -1345,6 +1410,13 @@ QJsonObject Server::toolCreateCryptoPayment(const QJsonObject &args) {
 
 	if (action == "get_history") {
 		const auto &history = wallet.history();
+		auto marked = QSet<QString>();
+		QSqlQuery marks(_db);
+		if (marks.exec("SELECT transaction_id FROM wallet_spam_marks")) {
+			while (marks.next()) {
+				marked.insert(marks.value(0).toString());
+			}
+		}
 		auto list = QJsonArray();
 		for (const auto &item : history) {
 			if (list.size() >= limit) {
@@ -1363,6 +1435,15 @@ QJsonObject Server::toolCreateCryptoPayment(const QJsonObject &args) {
 			if (item.date) {
 				tx["date"] = qint64(*item.date);
 			}
+			tx["kind"] = WalletKindName(item.kind);
+			if (item.onchainGift != Wallet::TransferOnchainGift::None) {
+				tx["onchain_gift"] = OnchainGiftActionName(item.onchainGift);
+			}
+			if (!item.collectible.isEmpty()) {
+				tx["collectible"] = item.collectible;
+			}
+			tx["suspected_spam"] = item.suspectedSpam;
+			tx["marked_spam_locally"] = marked.contains(item.id);
 			list.append(tx);
 		}
 		result["success"] = true;
