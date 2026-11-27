@@ -4930,11 +4930,13 @@ void Server::registerTools() {
 		Tool{"get_earnings", "Get creator earnings data", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 					{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel this applies to."}}},
 				}}}},
-		Tool{"withdraw_earnings", "Withdraw star earnings. NOT IMPLEMENTED: the withdrawal URL is gated on an SRP proof of the account 2FA password, which this server does not hold. Withdraw from Settings > Monetization", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"amount", QJsonObject{{"type", "number"}, {"description", "Amount to withdraw"}}},
-			{"method", QJsonObject{{"type", "string"}, {"description", "Withdrawal method (ton/fragment)"}, {"default", "ton"}}},
+		Tool{"withdraw_earnings", "Withdraw earnings. With to_wallet: true it sends TON or Stars revenue to this account's TON wallet, using the temporary 2FA password the app caches for about 10 minutes after the 2FA password is entered there; without one it refuses. Previews unless confirm: true. The Fragment withdrawal (to_wallet false) is NOT IMPLEMENTED: its URL needs an SRP proof of the 2FA password, which this server does not hold.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"amount", QJsonObject{{"type", "number"}, {"description", "Amount to withdraw; with to_wallet, omit or 0 for the whole balance"}}},
+			{"method", QJsonObject{{"type", "string"}, {"description", "Which revenue: ton or stars"}, {"default", "ton"}}},
+			{"to_wallet", QJsonObject{{"type", "boolean"}, {"description", "Withdraw to this account's TON wallet"}, {"default", false}}},
+			{"confirm", QJsonObject{{"type", "boolean"}, {"description", "Actually withdraw; otherwise only previews"}, {"default", false}}},
 					{"channel_id", QJsonObject{{"type", "integer"}, {"description", "Channel this applies to."}}},
-				}}, {"required", QJsonArray{"amount"}}}},
+				}}}},
 		Tool{"set_monetization_rules", "Configure monetization rules", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"rules", QJsonObject{{"type", "object"}, {"description", "Monetization rules configuration"}}}
 		}}, {"required", QJsonArray{"rules"}}}},
@@ -5272,6 +5274,20 @@ void Server::registerTools() {
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
 
 		// TLGRM 7.4.7 TOOLS: stories, on-chain gifts, layer 234
+		Tool{"list_onchain_gifts", "List this account's unique star gifts with their on-chain state: whether each is on the TON blockchain (gift_address, owner_address), on sale on-chain, its fixed or offer sale terms and when it can be withdrawn. Read-only.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"offset", QJsonObject{{"type", "string"}, {"description", "Paging cursor from a previous next_offset"}}},
+			{"limit", QJsonObject{{"type", "integer"}, {"description", "How many gifts to return (max 100)"}, {"default", 50}}}
+		}}}},
+		Tool{"decline_onchain_gift_offer", "Decline a buyer's on-chain offer for one of your gifts; the buyer's escrowed TON is refunded. Server-side only, no wallet signature. Previews unless confirm: true. Accepting, buying, listing or cancelling on-chain needs the wallet to sign and is only possible in the app.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"offer_msg_id", QJsonObject{{"type", "integer"}, {"description", "Id of the offer service message in the chat with the buyer"}}},
+			{"confirm", QJsonObject{{"type", "boolean"}, {"description", "Actually decline; otherwise only previews"}, {"default", false}}}
+		}}, {"required", QJsonArray{"offer_msg_id"}}}},
+		Tool{"withdraw_gift_onchain", "Move one of your unique gifts onto the TON blockchain. Uses the temporary 2FA password the app caches for about 10 minutes after the 2FA password is entered there; without one it refuses. Previews unless confirm: true.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"slug", QJsonObject{{"type", "string"}, {"description", "Slug of the unique gift. Use this or msg_id."}}},
+			{"msg_id", QJsonObject{{"type", "integer"}, {"description", "Message id of the saved gift. Use this or slug."}}},
+			{"keep_on_profile", QJsonObject{{"type", "boolean"}, {"description", "Keep showing the gift on your profile"}, {"default", true}}},
+			{"confirm", QJsonObject{{"type", "boolean"}, {"description", "Actually withdraw; otherwise only previews"}, {"default", false}}}
+		}}}},
 		Tool{"list_transcription_models", "List the on-device speech transcription models Telegram offers: each model's file, size, languages and version.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"version", QJsonObject{{"type", "integer"}, {"description", "Model version this client already has; 0 for all"}, {"default", 0}}}
 		}}}},

@@ -724,6 +724,9 @@ QJsonObject Server::toolGetEarnings(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolWithdrawEarnings(const QJsonObject &args) {
+	if (args.value("to_wallet").toBool() && _session) {
+		return withdrawEarningsToWallet(args);
+	}
 	QJsonObject result;
 	qint64 amount = args["amount"].toVariant().toLongLong();
 	QString method = args.value("method").toString("stars");  // stars or ton

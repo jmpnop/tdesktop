@@ -118,6 +118,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"create_quick_reply",            Backing::LocalOnly },
 	{"create_task",                   Backing::LiveSession },
 	{"create_task_from_message",      Backing::LiveSession },
+	{"decline_onchain_gift_offer",    Backing::Mtproto },
 	{"delete_all_welcome_messages",   Backing::Mtproto },
 	{"delete_auto_reply_rule",        Backing::LocalOnly },
 	{"delete_channel",                Backing::Mtproto },
@@ -348,6 +349,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"list_marketplace",              Backing::Mtproto },
 	{"list_message_history",          Backing::LiveSession },
 	{"list_miniapp_permissions",      Backing::Mtproto },
+	{"list_onchain_gifts",            Backing::Mtproto },
 	{"list_purchased_content",        Backing::LocalOnly },
 	{"list_quick_replies",            Backing::LocalOnly },
 	{"list_rich_messages",            Backing::LiveSession },
@@ -510,6 +512,7 @@ inline constexpr std::array kToolBackings = std::to_array<ToolBackingEntry>({
 	{"use_quick_reply",               Backing::Mtproto },
 	{"vote_poll",                     Backing::Mtproto },
 	{"withdraw_earnings",             Backing::Unimplemented },
+	{"withdraw_gift_onchain",         Backing::Mtproto },
 });
 
 // Backing recorded for `name`, or Unimplemented when the name is unknown --

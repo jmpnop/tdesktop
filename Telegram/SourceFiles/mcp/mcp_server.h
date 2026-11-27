@@ -321,10 +321,14 @@ private:
 
 	// Forum topic tools (1 tool)
 	QJsonObject toolListTopics(const QJsonObject &args);
+	QJsonObject toolListOnchainGifts(const QJsonObject &args);
+	QJsonObject toolDeclineOnchainGiftOffer(const QJsonObject &args);
+	QJsonObject toolWithdrawGiftOnchain(const QJsonObject &args);
 	QJsonObject toolListTranscriptionModels(const QJsonObject &args);
 	QJsonObject toolInviteUsersToBot(const QJsonObject &args);
 	QJsonObject toolSetChatAiStyle(const QJsonObject &args);
 	QJsonObject toolGetMessageWidget(const QJsonObject &args);
+	QJsonObject withdrawEarningsToWallet(const QJsonObject &args);
 	QJsonObject searchForumTopics(
 		not_null<ChannelData*> channel,
 		const QJsonObject &args,

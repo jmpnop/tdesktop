@@ -1733,6 +1733,7 @@ PRIVATE
     mcp/mcp_tool_backing.h
     mcp/mcp_tool_registry.cpp
     mcp/mcp_topic_tools.cpp
+    mcp/mcp_onchain_tools.cpp
     mcp/mcp_extra_tools.cpp
     mcp/mcp_wallet_tools.cpp
     mcp/message_scheduler.cpp

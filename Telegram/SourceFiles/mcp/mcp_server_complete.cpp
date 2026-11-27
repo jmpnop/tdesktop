@@ -1606,6 +1606,9 @@ void Server::initializeToolHandlers() {
 
 	// FORUM TOPIC TOOLS
 	_toolHandlers["list_topics"] = [this](const QJsonObject &args) { return toolListTopics(args); };
+	_toolHandlers["list_onchain_gifts"] = [this](const QJsonObject &args) { return toolListOnchainGifts(args); };
+	_toolHandlers["decline_onchain_gift_offer"] = [this](const QJsonObject &args) { return toolDeclineOnchainGiftOffer(args); };
+	_toolHandlers["withdraw_gift_onchain"] = [this](const QJsonObject &args) { return toolWithdrawGiftOnchain(args); };
 	_toolHandlers["list_transcription_models"] = [this](const QJsonObject &args) { return toolListTranscriptionModels(args); };
 	_toolHandlers["invite_users_to_bot"] = [this](const QJsonObject &args) { return toolInviteUsersToBot(args); };
 	_toolHandlers["set_chat_ai_style"] = [this](const QJsonObject &args) { return toolSetChatAiStyle(args); };
