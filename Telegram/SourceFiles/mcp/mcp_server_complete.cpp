@@ -1606,6 +1606,10 @@ void Server::initializeToolHandlers() {
 
 	// FORUM TOPIC TOOLS
 	_toolHandlers["list_topics"] = [this](const QJsonObject &args) { return toolListTopics(args); };
+	_toolHandlers["list_transcription_models"] = [this](const QJsonObject &args) { return toolListTranscriptionModels(args); };
+	_toolHandlers["invite_users_to_bot"] = [this](const QJsonObject &args) { return toolInviteUsersToBot(args); };
+	_toolHandlers["set_chat_ai_style"] = [this](const QJsonObject &args) { return toolSetChatAiStyle(args); };
+	_toolHandlers["get_message_widget"] = [this](const QJsonObject &args) { return toolGetMessageWidget(args); };
 
 	// VOICE TOOLS
 	_toolHandlers["transcribe_voice"] = [this](const QJsonObject &args) { return toolTranscribeVoice(args); };

@@ -5271,6 +5271,26 @@ void Server::registerTools() {
 			{"path", QJsonObject{{"type", "string"}, {"description", "Directory to write into; defaults to the export directory"}}}
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
 
+		// TLGRM 7.4.7 TOOLS: stories, on-chain gifts, layer 234
+		Tool{"list_transcription_models", "List the on-device speech transcription models Telegram offers: each model's file, size, languages and version.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"version", QJsonObject{{"type", "integer"}, {"description", "Model version this client already has; 0 for all"}, {"default", 0}}}
+		}}}},
+		Tool{"invite_users_to_bot", "Invite users to start a bot (messages.inviteUsersToBot).", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"bot_id", QJsonObject{{"type", "integer"}, {"description", "User id of the bot"}}},
+			{"user_ids", QJsonObject{{"type", "array"}, {"description", "User ids to invite"}, {"items", QJsonObject{{"type", "integer"}}}}}
+		}}, {"required", QJsonArray{"bot_id", "user_ids"}}}},
+		Tool{"set_chat_ai_style", "Set or clear the AI compose style Telegram applies to drafts in one chat: tone (a preset name or a custom prompt), target language, emoji and proofreading. With no style fields it clears the style.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The chat"}}},
+			{"tone", QJsonObject{{"type", "string"}, {"description", "Preset tone name"}}},
+			{"custom_prompt", QJsonObject{{"type", "string"}, {"description", "Free-text tone instruction, used instead of tone"}}},
+			{"to_lang", QJsonObject{{"type", "string"}, {"description", "Language code to translate into"}}},
+			{"emojify", QJsonObject{{"type", "boolean"}, {"description", "Add emoji"}, {"default", false}}},
+			{"proofread", QJsonObject{{"type", "boolean"}, {"description", "Fix spelling and grammar"}, {"default", false}}}
+		}}, {"required", QJsonArray{"chat_id"}}}},
+		Tool{"get_message_widget", "Read the metadata of a sandboxed HTML widget attached to a loaded message: size, widget id, query flags and its public and chat data. The widget's HTML is bot code and is never returned or run.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The chat"}}},
+			{"message_id", QJsonObject{{"type", "integer"}, {"description", "The message with the widget"}}}
+		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
 
 		// FORUM TOPIC TOOLS
 		Tool{"list_topics", "List a forum's topics with their unread counts. Passing query, icon_emoji_id or closed searches the server instead of the loaded list.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

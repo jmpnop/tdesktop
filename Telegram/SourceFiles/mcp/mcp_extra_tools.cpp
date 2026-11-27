@@ -24,6 +24,8 @@
 #include "core/application.h"
 #include "data/data_todo_list.h"
 #include "data/stickers/data_stickers.h"
+#include "data/data_document.h"
+#include "tgw/tgw_media.h"
 
 #include <QtCore/QEventLoop>
 
@@ -2491,6 +2493,179 @@ QJsonObject Server::toolAppendTodoTasks(const QJsonObject &args) {
 			fail(error.type());
 		}).send();
 	});
+}
+
+} // namespace MCP
+
+// Layer 234 additions: transcription models, bot invites, AI compose style, widgets.
+namespace MCP {
+
+QJsonObject Server::toolListTranscriptionModels(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto version = args.value("version").toInt(0);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_GetTranscriptionModels(
+			MTP_int(version)
+		)).done([=](const MTPVector<MTPTranscriptionModel> &result) {
+			auto models = QJsonArray();
+			for (const auto &model : result.v) {
+				const auto &data = model.data();
+				const auto document = session->data().processDocument(
+					data.vdocument());
+				auto languages = QJsonArray();
+				for (const auto &language : data.vlanguages().v) {
+					languages.append(qs(language));
+				}
+				models.append(QJsonObject{
+					{ "version", data.vversion().v },
+					{ "languages", languages },
+					{ "document_id", QString::number(document->id) },
+					{ "file_name", document->filename() },
+					{ "size", qint64(document->size) },
+				});
+			}
+			done(QJsonObject{
+				{ "success", true },
+				{ "models", models },
+				{ "count", models.size() },
+			});
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolInviteUsersToBot(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto peer = resolvePeer(args["bot_id"].toVariant().toLongLong());
+	const auto bot = peer ? peer->asUser() : nullptr;
+	if (!bot || !bot->isBot()) {
+		return toolError("bot_id must be the user id of a bot this client knows");
+	}
+	auto users = QVector<MTPInputUser>();
+	for (const auto &id : args["user_ids"].toArray()) {
+		const auto p = resolvePeer(id.toVariant().toLongLong());
+		const auto user = p ? p->asUser() : nullptr;
+		if (!user) {
+			return toolError(QString("user_ids: no user %1 in this client's data"
+				).arg(id.toVariant().toLongLong()));
+		}
+		users.push_back(user->inputUser());
+	}
+	if (users.isEmpty()) {
+		return toolError("user_ids must list at least one user");
+	}
+	const auto session = _session;
+	const auto count = int(users.size());
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPmessages_InviteUsersToBot(
+			bot->inputUser(),
+			MTP_vector<MTPInputUser>(users)
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{ "success", mtpIsTrue(result) },
+				{ "invited", count },
+			});
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+QJsonObject Server::toolSetChatAiStyle(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	if (!peer) {
+		return toolError(QString("No chat %1 in this client's data").arg(chatId));
+	}
+	const auto tone = args.value("tone").toString();
+	const auto prompt = args.value("custom_prompt").toString();
+	const auto toLang = args.value("to_lang").toString();
+	const auto emojify = args.value("emojify").toBool();
+	const auto proofread = args.value("proofread").toBool();
+	const auto clear = tone.isEmpty() && prompt.isEmpty() && toLang.isEmpty()
+		&& !emojify && !proofread;
+	using StyleFlag = MTPDinputAiComposeStyle::Flag;
+	const auto styleFlags = ((tone.isEmpty() && prompt.isEmpty())
+			? StyleFlag()
+			: StyleFlag::f_tone)
+		| (toLang.isEmpty() ? StyleFlag() : StyleFlag::f_to_lang)
+		| (emojify ? StyleFlag::f_emojify : StyleFlag())
+		| (proofread ? StyleFlag::f_proofread : StyleFlag());
+	const auto style = MTP_inputAiComposeStyle(
+		MTP_flags(styleFlags),
+		prompt.isEmpty()
+			? MTP_inputAiComposeToneDefault(MTP_string(tone))
+			: MTP_inputAiComposeToneSingleUse(MTP_string(prompt)),
+		MTP_string(toLang));
+	using Flag = MTPaicompose_SetChatStyle::Flag;
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPaicompose_SetChatStyle(
+			MTP_flags(clear ? Flag() : Flag::f_style),
+			peer->input(),
+			style
+		)).done([=](const MTPBool &result) {
+			done(QJsonObject{
+				{ "success", mtpIsTrue(result) },
+				{ "chat_id", chatId },
+				{ "cleared", clear },
+			});
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
+}
+
+// The widget's HTML is untrusted bot code, so only its metadata and data blobs are returned.
+QJsonObject Server::toolGetMessageWidget(const QJsonObject &args) {
+	if (!_session) {
+		return toolError("No active session");
+	}
+	const auto chatId = args["chat_id"].toVariant().toLongLong();
+	const auto msgId = args["message_id"].toVariant().toLongLong();
+	const auto peer = resolvePeer(chatId);
+	const auto item = peer
+		? _session->data().message(peer->id, MsgId(msgId))
+		: nullptr;
+	if (!item) {
+		return toolError(QString("Message %1 in chat %2 is not loaded"
+			).arg(msgId).arg(chatId));
+	}
+	const auto widget = dynamic_cast<Tgw::WidgetMedia*>(item->media());
+	if (!widget) {
+		return toolError("This message has no HTML widget");
+	}
+	const auto &fields = widget->fields();
+	auto result = QJsonObject{
+		{ "success", true },
+		{ "chat_id", chatId },
+		{ "message_id", msgId },
+		{ "width", fields.anchors.width },
+		{ "height", fields.anchors.height },
+		{ "is_copy", fields.flags.isCopy },
+		{ "can_query", fields.flags.canQuery },
+		{ "background_query", fields.flags.backgroundQuery },
+		{ "payload_bytes", int(fields.payload.size()) },
+	};
+	if (fields.widgetId) {
+		result["widget_id"] = QString::number(*fields.widgetId);
+	}
+	if (fields.state.publicData) {
+		result["public_data"] = QString::fromUtf8(*fields.state.publicData);
+	}
+	if (fields.state.chatData) {
+		result["chat_data"] = QString::fromUtf8(*fields.state.chatData);
+	}
+	return result;
 }
 
 } // namespace MCP
