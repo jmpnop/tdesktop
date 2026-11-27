@@ -1,3 +1,8 @@
+7.4.7a (27.11.26)
+
+- Rebase onto Telegram Desktop 7.4.7.
+- New MCP tools for stories, on-chain gifts and wallet earnings.
+
 7.4.7 (26.11.26)
 
 - Add music to stories.
