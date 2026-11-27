@@ -1781,6 +1781,7 @@ void SetDirectedAmount(
 	SetDirectedAmount(result, data.vamount().v, data.is_incoming());
 	result.feeNano = data.vfee().v;
 	result.gasless = data.is_gasless();
+	result.suspectedSpam = data.is_suspected_spam();
 	result.date = data.vdate().v;
 	result.status = data.is_failed()
 		? TransferItem::Status::Failure

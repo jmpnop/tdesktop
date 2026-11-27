@@ -268,6 +268,7 @@ struct TransferItem {
 	int64 amountNano = 0;
 	std::optional<int64> feeNano;
 	bool gasless = false;
+	bool suspectedSpam = false; // set by the server, only on server items
 	QString comment;
 	bool commentEncrypted = false;
 	EncryptedFormat encryptedFormat = EncryptedFormat::Unavailable;
