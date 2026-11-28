@@ -3115,10 +3115,11 @@ void Server::registerTools() {
 		// Gifts - 4 tools
 		Tool{
 			"list_gifts",
-			"List received/sent gifts",
+			"List the Telegram star gift catalog (same as list_star_gifts; received gifts are in get_profile_gifts)",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
+					{"resale_only", QJsonObject{{"type", "boolean"}, {"description", "Only gifts with unique versions on resale (usable as list_marketplace gift_id)"}}}
 				}}
 			}
 		},
@@ -3807,10 +3808,11 @@ void Server::registerTools() {
 		// Star Gifts Management - 8 tools
 		Tool{
 			"list_star_gifts",
-			"List available star gifts",
+			"List the Telegram star gift catalog: gift_id, title, price, limited supply and resale availability",
 			QJsonObject{
 				{"type", "object"},
 				{"properties", QJsonObject{
+					{"resale_only", QJsonObject{{"type", "boolean"}, {"description", "Only gifts with unique versions on resale (usable as list_marketplace gift_id)"}}}
 				}}
 			}
 		},
@@ -4906,7 +4908,9 @@ void Server::registerTools() {
 			{"direction", QJsonObject{{"type", "string"}, {"description", "Filter: sent/received/both"}, {"default", "both"}}},
 					{"limit", QJsonObject{{"type", "integer"}, {"description", "Maximum number of results to return (default 50)."}}},
 				}}}},
-		Tool{"list_available_gifts", "List available gift types", QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}}},
+		Tool{"list_available_gifts", "List the Telegram star gift catalog: gift_id, title, price, limited supply and resale availability", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"resale_only", QJsonObject{{"type", "boolean"}, {"description", "Only gifts with unique versions on resale (usable as list_marketplace gift_id)"}}}
+		}}}},
 		Tool{"get_gift_suggestions", "Get gift suggestions for a user", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
 			{"recipient_id", QJsonObject{{"type", "integer"}, {"description", "Recipient user ID"}}}
 		}}, {"required", QJsonArray{"recipient_id"}}}},
@@ -5307,8 +5311,8 @@ void Server::registerTools() {
 			{"chat_id", QJsonObject{{"type", "integer"}, {"description", "The chat"}}},
 			{"message_id", QJsonObject{{"type", "integer"}, {"description", "The message with the widget"}}}
 		}}, {"required", QJsonArray{"chat_id", "message_id"}}}},
-		Tool{"mark_transaction_spam", "Mark or unmark a TON wallet transaction as spam in this client's database. Telegram has no API to report a wallet transaction, so the mark is local; manage_wallet get_history shows it as marked_spam_locally next to the server's suspected_spam.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
-			{"transaction_id", QJsonObject{{"type", "string"}, {"description", "Transaction id from manage_wallet get_history"}}},
+		Tool{"mark_transaction_spam", "Mark or unmark a TON wallet transaction as spam in this client's database. Telegram has no API to report a wallet transaction, so the mark is local; create_crypto_payment action=get_history shows it as marked_spam_locally next to the server's suspected_spam.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{
+			{"transaction_id", QJsonObject{{"type", "string"}, {"description", "Transaction id from create_crypto_payment action=get_history"}}},
 			{"spam", QJsonObject{{"type", "boolean"}, {"description", "true to mark, false to unmark"}, {"default", true}}}
 		}}, {"required", QJsonArray{"transaction_id"}}}},
 		Tool{"post_story", "Post a photo or video story from a local file, with caption, privacy, lifetime, pinning and an optional music track. A file that already fits the story format is sent as is; anything else is fitted on a 9:16 canvas and transcoded. Music turns a photo into a video story and replaces a video's own sound. Returns an upload_id to follow with list_story_uploads.", QJsonObject{{"type", "object"}, {"properties", QJsonObject{

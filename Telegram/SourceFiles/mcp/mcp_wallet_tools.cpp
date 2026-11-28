@@ -395,50 +395,68 @@ QJsonObject Server::toolGetGiftHistory(const QJsonObject &args) {
 }
 
 QJsonObject Server::toolListAvailableGifts(const QJsonObject &args) {
-	Q_UNUSED(args);
-	QJsonObject result;
-
 	if (!_session) {
-		result["error"] = "No active session";
-		result["success"] = false;
-		return result;
+		return toolError("No active session");
 	}
-
-	// Request topup options which show available star amounts
-	_session->api().request(MTPpayments_GetStarsTopupOptions(
-	)).done([](const MTPVector<MTPStarsTopupOption> &options) {
-		// Options loaded, will be cached by the session
-		qWarning() << "MCP: Loaded" << options.v.size() << "star topup options";
-	}).fail([](const MTP::Error &error) {
-		qWarning() << "MCP: Failed to load star topup options:" << error.type();
-	}).send();
-
-	// Also request available star gifts
-	_session->api().request(MTPpayments_GetStarGifts(
-		MTP_int(0)  // hash for caching
-	)).done([](const MTPpayments_StarGifts &gifts) {
-		gifts.match([](const MTPDpayments_starGifts &data) {
-			qWarning() << "MCP: Loaded" << data.vgifts().v.size() << "star gifts";
-		}, [](const MTPDpayments_starGiftsNotModified &) {
-			qWarning() << "MCP: Star gifts not modified (cached)";
-		});
-	}).fail([](const MTP::Error &error) {
-		qWarning() << "MCP: Failed to load star gifts:" << error.type();
-	}).send();
-
-	QJsonArray gifts;
-	QJsonObject starGift;
-	starGift["type"] = "star_gift";
-	starGift["description"] = "Send stars as a gift to another user";
-	starGift["note"] = "Gift options are being loaded from Telegram API. "
-					   "Use get_wallet_balance to check your stars balance first.";
-	gifts.append(starGift);
-
-	result["success"] = true;
-	result["available_gifts"] = gifts;
-	result["api_request"] = "submitted";
-
-	return result;
+	const auto resaleOnly = args.value("resale_only").toBool(false);
+	const auto session = _session;
+	return awaitMtp([&](auto done, auto fail) {
+		session->api().request(MTPpayments_GetStarGifts(
+			MTP_int(0) // hash
+		)).done([=](const MTPpayments_StarGifts &result) {
+			result.match([&](const MTPDpayments_starGifts &data) {
+				session->data().processUsers(data.vusers());
+				session->data().processChats(data.vchats());
+				auto gifts = QJsonArray();
+				for (const auto &gift : data.vgifts().v) {
+					gift.match([&](const MTPDstarGift &fields) {
+						const auto resale = fields.vavailability_resale()
+							? qint64(fields.vavailability_resale()->v)
+							: qint64(0);
+						if (resaleOnly && !resale) {
+							return;
+						}
+						auto entry = QJsonObject();
+						entry["gift_id"] = QString::number(fields.vid().v);
+						if (const auto title = fields.vtitle()) {
+							entry["title"] = qs(*title);
+						}
+						entry["stars"] = qint64(fields.vstars().v);
+						entry["convert_stars"] = qint64(fields.vconvert_stars().v);
+						entry["limited"] = fields.is_limited();
+						entry["sold_out"] = fields.is_sold_out();
+						entry["require_premium"] = fields.is_require_premium();
+						entry["auction"] = fields.is_auction();
+						if (const auto remains = fields.vavailability_remains()) {
+							entry["availability_remains"] = remains->v;
+						}
+						if (const auto total = fields.vavailability_total()) {
+							entry["availability_total"] = total->v;
+						}
+						entry["resale_available"] = resale;
+						if (const auto min = fields.vresell_min_stars()) {
+							entry["resell_min_stars"] = qint64(min->v);
+						}
+						if (const auto upgrade = fields.vupgrade_stars()) {
+							entry["upgrade_stars"] = qint64(upgrade->v);
+						}
+						gifts.append(entry);
+					}, [](const MTPDstarGiftUnique &) {
+					});
+				}
+				done(QJsonObject{
+					{ "success", true },
+					{ "source", "server" },
+					{ "count", gifts.size() },
+					{ "available_gifts", gifts },
+				});
+			}, [&](const MTPDpayments_starGiftsNotModified &) {
+				fail(u"STARGIFTS_NOT_MODIFIED"_q);
+			});
+		}).fail([=](const MTP::Error &error) {
+			fail(error.type());
+		}).send();
+	});
 }
 
 QJsonObject Server::toolGetGiftSuggestions(const QJsonObject &args) {
