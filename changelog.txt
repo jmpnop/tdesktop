@@ -1,3 +1,7 @@
+7.4.7b (28.11.26)
+
+- Fix list_topics closed=false and the star gift catalog tools.
+
 7.4.7a (27.11.26)
 
 - Rebase onto Telegram Desktop 7.4.7.
