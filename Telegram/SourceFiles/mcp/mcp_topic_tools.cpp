@@ -86,10 +86,11 @@ QJsonObject Server::searchForumTopics(
 	using Flag = MTPmessages_GetForumTopics::Flag;
 	const auto query = args.value("query").toString();
 	const auto emojiId = args.value("icon_emoji_id").toVariant().toLongLong();
+	// The server's closed:false filter drops open topics, so filter here.
 	const auto hasClosed = args.contains("closed");
+	const auto closed = args.value("closed").toBool();
 	const auto flags = (query.isEmpty() ? Flag() : Flag::f_q)
-		| (args.contains("icon_emoji_id") ? Flag::f_icon_emoji_id : Flag())
-		| (hasClosed ? Flag::f_closed : Flag());
+		| (args.contains("icon_emoji_id") ? Flag::f_icon_emoji_id : Flag());
 	const auto session = _session;
 	const auto chatId = qint64(channel->id.value);
 	return awaitMtp([&](auto done, auto fail) {
@@ -98,16 +99,20 @@ QJsonObject Server::searchForumTopics(
 			channel->input(),
 			MTP_string(query),
 			MTP_long(emojiId),
-			MTP_bool(args.value("closed").toBool()),
+			MTPBool(),
 			MTP_int(0),
 			MTP_int(0),
 			MTP_int(0),
-			MTP_int(limit)
+			MTP_int(hasClosed ? 100 : limit)
 		)).done([=](const MTPmessages_ForumTopics &result) {
 			const auto &data = result.data();
 			auto items = QJsonArray();
 			for (const auto &topic : data.vtopics().v) {
 				topic.match([&](const MTPDforumTopic &fields) {
+					if ((hasClosed && fields.is_closed() != closed)
+						|| items.size() >= limit) {
+						return;
+					}
 					auto entry = QJsonObject();
 					entry["topic_id"] = fields.vid().v;
 					entry["title"] = qs(fields.vtitle());
